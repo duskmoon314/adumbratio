@@ -137,6 +137,34 @@ fn count_sketch_merge_matches_single_sketch() {
 }
 
 #[test]
+fn blocked_bloom_merge_matches_single_filter() {
+    use adumbratio::sketch::BlockedBloomFilter;
+
+    let geometry = BloomGeometry {
+        bits: 1 << 16,
+        hashes: 7,
+    };
+    let mut left = BlockedBloomFilter::from_geometry(geometry, 9);
+    let mut right = BlockedBloomFilter::from_geometry(geometry, 9);
+    let mut single = BlockedBloomFilter::from_geometry(geometry, 9);
+
+    for i in 0..10_000_u64 {
+        left.insert_item(&i);
+        single.insert_item(&i);
+    }
+    for i in 10_000..20_000_u64 {
+        right.insert_item(&i);
+        single.insert_item(&i);
+    }
+
+    left.merge_from(&right).unwrap();
+    assert_eq!(left.fill_ratio(), single.fill_ratio());
+    for i in (0..30_000_u64).step_by(7) {
+        assert_eq!(left.contains_item(&i), single.contains_item(&i));
+    }
+}
+
+#[test]
 fn merge_rejects_incompatible_sketches() {
     let geometry = CountMinGeometry {
         width: 128,

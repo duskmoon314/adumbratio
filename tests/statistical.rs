@@ -64,6 +64,30 @@ fn bloom_empirical_fpp_within_theoretical_bound() {
 }
 
 #[test]
+fn blocked_bloom_empirical_fpp_near_theoretical_bound() {
+    use adumbratio::sketch::BlockedBloomFilter;
+
+    // Blocking makes bit selection non-uniform, so the realized FPP sits
+    // above the classical prediction; the bound here is deliberately looser
+    // than for the classical filter.
+    for (n, p) in [(1_000, 0.01), (50_000, 0.001)] {
+        let mut filter = BlockedBloomFilter::with_capacity_and_seed(n, p, 42);
+        for i in 0..n {
+            filter.insert_item(&i);
+        }
+        for i in 0..n {
+            assert!(filter.contains_item(&i), "false negative for {i}");
+        }
+
+        let fpp = false_positive_rate(n, 100_000, |i| filter.contains_item(&i));
+        assert!(
+            fpp <= 2.5 * p,
+            "empirical FPP {fpp} exceeds 2.5x target {p} for n = {n}"
+        );
+    }
+}
+
+#[test]
 fn counting_bloom_deletion_preserves_members() {
     let n = 5_000_u64;
     let mut filter = CountingBloomFilter::with_capacity_and_seed(n, 0.01, 3);

@@ -133,6 +133,11 @@ impl<S, I> BloomFilter<S, I> {
         self.seed_fingerprint
     }
 
+    /// Returns the index derivation scheme.
+    pub const fn scheme(&self) -> &I {
+        &self.scheme
+    }
+
     /// Returns the fraction of bits currently set.
     pub fn fill_ratio(&self) -> f64 {
         self.bits.count_ones() as f64 / self.geometry.bits as f64
