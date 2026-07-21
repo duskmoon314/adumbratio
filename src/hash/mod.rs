@@ -5,7 +5,10 @@ mod index;
 mod item;
 
 pub use fingerprint::PartialKeyCuckoo;
-pub use index::{DoubleHashing, IndexScheme, reduce, row_index, sign};
+pub use index::{
+    Blocked, DoubleHashing, EnhancedDoubleHashing, IndexScheme, Partitioned, reduce, row_index,
+    sign,
+};
 pub use item::{DefaultBuildHasher, ItemHasher, StableHasher, hash_one};
 
 pub(crate) fn mix64(mut x: u64) -> u64 {
