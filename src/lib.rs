@@ -9,6 +9,7 @@
 pub mod block;
 pub mod error;
 pub mod hash;
+pub mod policy;
 pub mod traits;
 
 pub use error::MergeError;
