@@ -1,8 +1,10 @@
 //! Hashing blocks.
 
+mod fingerprint;
 mod index;
 mod item;
 
+pub use fingerprint::PartialKeyCuckoo;
 pub use index::{DoubleHashing, IndexScheme, reduce, row_index, sign};
 pub use item::{DefaultBuildHasher, ItemHasher, StableHasher, hash_one};
 
