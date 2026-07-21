@@ -132,6 +132,30 @@ counters.set(3, 15);
 assert_eq!(counters.get(3), 15);
 ```
 
+## Examples: reproducing the papers
+
+Each sketch's doc comments cite the paper it implements. The `examples/`
+programs go further and reproduce the papers' evaluation methodology on
+synthetic data, printing measured values next to the analytical
+predictions:
+
+- `cargo run --release --example bloom_fpp` — empirical FPP vs. Bloom's
+  formula across `k` (validating double hashing per Kirsch–Mitzenmacher),
+  plus the blocked filter's FPP trade-off per Putze–Sanders–Singler.
+- `cargo run --release --example cuckoo_load_fpp` — FPP vs. occupancy, max
+  load factor (~95%), and the bits-per-item space comparison with Bloom
+  filters, per Fan et al. 2014.
+- `cargo run --release --example count_min_zipf` — Count-Min error vs. the
+  `ε·N` bound on a Zipf stream, the conservative-update improvement
+  (Estan–Varghese), and heavy-hitter accuracy vs. Count Sketch.
+
+## Benchmarks
+
+`cargo bench` runs a criterion suite over insert/query/remove/estimate for
+every sketch (deterministic inputs, ~2s per measurement). Baselines are kept
+under `target/criterion/` so regressions show up as percentage changes on
+subsequent runs.
+
 ## Design principles
 
 - **Composability first** — the built-in sketches use only the public block
