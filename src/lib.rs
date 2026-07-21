@@ -1,8 +1,10 @@
 //! Composable building blocks for probabilistic data structures.
 //!
 //! `adumbratio` decomposes sketches into storage, hashing, policy, and
-//! composed-sketch layers. The first implemented sketch is a Bloom filter built
-//! entirely from the public block APIs.
+//! composed-sketch layers. The ready-made sketches — Bloom, counting Bloom,
+//! blocked Bloom, Count-Min, Count Sketch, and Cuckoo filter — are built
+//! entirely from the public block APIs, and custom compositions can be
+//! assembled from the same blocks.
 //!
 //! ```
 //! use adumbratio::sketch::BloomFilter;

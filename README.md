@@ -1,9 +1,11 @@
 # adumbratio
 
-> **Status: Stage 3 implemented.** Storage blocks, hashing blocks, policies,
-> capability traits, Bloom, Counting Bloom, Count-Min, Count Sketch, and Cuckoo
-> filter are working and tested. See [DESIGN.md](DESIGN.md) for the full
-> architecture.
+> **Status: Stage 3 + part of stage 4 implemented.** Storage blocks, hashing
+> blocks, policies, capability traits, Bloom, Counting Bloom, Count-Min,
+> Count Sketch, Cuckoo filter, and Blocked Bloom are working and tested —
+> including a seeded statistical suite that validates the error bounds from
+> the papers. `no_std` and `serde` are still pending. See
+> [DESIGN.md](DESIGN.md) for the full architecture.
 
 Composable building blocks for probabilistic data structures ("sketches") in
 Rust — plus the classical sketches assembled from them.
@@ -20,21 +22,23 @@ sketch = storage layout × index derivation × update policy
 `adumbratio` makes those parts first-class:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ sketches   Bloom · CountingBloom · CountMin · Cuckoo · …    │
-├─────────────────────────────────────────────────────────────┤
-│ policies   Saturating · ConservativeUpdate · KickLoop       │
-├─────────────────────────────────────────────────────────────┤
-│ hashing    DoubleHashing · Partitioned · Blocked · PartialKeyCuckoo │
-├─────────────────────────────────────────────────────────────┤
-│ storage    BitArray · PackedArray<BITS> · BucketArray · Matrix │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ sketches   Bloom · CountingBloom · BlockedBloom · CountMin ·     │
+│            CountSketch · Cuckoo · …                              │
+├──────────────────────────────────────────────────────────────────┤
+│ policies   Saturating · Checked · ConservativeUpdate · KickLoop  │
+├──────────────────────────────────────────────────────────────────┤
+│ hashing    DoubleHashing · EnhancedDoubleHashing · Partitioned · │
+│            Blocked · PartialKeyCuckoo                            │
+├──────────────────────────────────────────────────────────────────┤
+│ storage    BitArray · PackedArray<BITS> · BucketArray · Matrix   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 Use the ready-made classical sketches, or build directly from the public
 blocks when a workload needs a custom composition.
 
-## Planned sketches
+## Implemented sketches
 
 | Sketch | Answers | Built from | Stage |
 |---|---|---|---|
@@ -42,9 +46,21 @@ blocks when a workload needs a custom composition.
 | Counting Bloom filter | membership + deletion | `PackedArray<4>` + `DoubleHashing` + `Saturating` | ✅ 3 |
 | Count-Min Sketch (+ conservative update) | frequency (never underestimates) | `Matrix<PackedArray<32>>` + row indexing | ✅ 3 |
 | Count Sketch | frequency (unbiased) | `Matrix<PackedArray<64>>` + signed median read | ✅ 3 |
-| Cuckoo filter | membership + deletion, high load factor | `BucketArray` + `PartialKeyCuckoo` + `KickLoop` | ✅ 3 |
-| Blocked Bloom filter | membership, cache-friendly | `BitArray` + `Blocked` scheme | 4 |
-| HyperLogLog, MinHash, top-k | cardinality, similarity, heavy hitters | `PackedArray<6>`, … | 5 |
+| Cuckoo filter | membership + deletion, high load factor | `BucketArray<F>` + `PartialKeyCuckoo` + `KickLoop` | ✅ 3 |
+| Blocked Bloom filter | membership, cache-friendly | `BitArray` + `Blocked` scheme | ✅ 4 |
+
+## Planned sketches
+
+| Sketch | Answers | Built from | Stage |
+|---|---|---|---|
+| HyperLogLog | cardinality | `PackedArray<6>` registers + max update | 5 |
+| MinHash, top-k | similarity, heavy hitters | … | 5 |
+
+Each sketch's doc comments cite the paper it reproduces (with DOI links),
+and the integration tests in `tests/` validate the paper's guarantees
+empirically: false-positive rates against the analytical bound, frequency
+error within `ε·N`, no false negatives under deletion workloads, and merge
+algebra.
 
 ## Usage
 
@@ -52,13 +68,19 @@ Ready-made, target-driven construction:
 
 ```rust
 use adumbratio::sketch::{
-    BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter, CuckooFilter,
+    BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
+    CuckooFilter,
 };
 
 // 10M expected items, 1% false-positive rate — m and k solved for you
 let mut bloom = BloomFilter::with_capacity(10_000_000, 0.01);
 bloom.insert_item("alice");
 assert!(bloom.contains_item("alice"));
+
+// Same, but all probed bits live in one cache-line block
+let mut blocked = BlockedBloomFilter::with_capacity(10_000_000, 0.01);
+blocked.insert_item("alice");
+assert!(blocked.contains_item("alice"));
 
 let mut counting = CountingBloomFilter::with_capacity(10_000, 0.01);
 counting.insert_item("alice");
@@ -127,10 +149,10 @@ assert_eq!(counters.get(3), 15);
 
 ## Roadmap
 
-1. ✅ **Design** — [DESIGN.md](DESIGN.md) (you are here)
+1. ✅ **Design** — [DESIGN.md](DESIGN.md)
 2. ✅ Storage/hashing/policy blocks + capability traits + Bloom filter, fully tested
 3. ✅ Counting Bloom, Count-Min (+CU), Count Sketch, Cuckoo filter
-4. `no_std`, `serde`, blocked Bloom, 0.1 release
+4. ◐ Blocked Bloom ✅, seeded statistical/merge test suites ✅; `no_std`, `serde`, 0.1 release pending
 5. HyperLogLog, MinHash, top-k, benchmarks against existing crates
 
 ## License
