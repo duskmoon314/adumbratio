@@ -308,7 +308,7 @@ fn cuckoo_insert_deduplicates_fingerprint_twins() {
     }
     let (a, b) = twins.expect("8-bit fingerprints should collide quickly");
 
-    let mut filter = CuckooFilter::from_geometry(geometry, seed);
+    let mut filter = CuckooFilter::<u8>::from_geometry(geometry, seed);
     filter.insert_item(&a).unwrap();
     let occupancy = filter.occupancy();
     filter.insert_item(&b).unwrap();

@@ -2,7 +2,7 @@
 
 use std::hash::{BuildHasher, Hash};
 
-use crate::block::BucketArray;
+use crate::block::{BucketArray, Fingerprint};
 use crate::error::SketchFull;
 use crate::hash::{DefaultBuildHasher, PartialKeyCuckoo, hash_one};
 use crate::policy::{KickLoop, XorShift64};
@@ -15,7 +15,8 @@ pub struct CuckooGeometry {
     pub buckets: usize,
     /// Number of fingerprint slots in each bucket.
     pub slots_per_bucket: usize,
-    /// Number of fingerprint bits stored per item.
+    /// Number of fingerprint bits stored per item. Must equal the width of
+    /// the filter's fingerprint type `F`.
     pub fingerprint_bits: u32,
     /// Maximum number of evictions attempted by one insertion.
     pub max_kicks: usize,
@@ -51,6 +52,16 @@ pub struct CuckooGeometry {
 /// fingerprint clears a concrete slot. Insertions are fallible: once the table
 /// is too full, the kick loop may be unable to place a displaced fingerprint.
 ///
+/// The fingerprint type `F` fixes the storage width at the type level: the
+/// default `u16` uses two bytes per slot regardless of the target FPP. Two
+/// items sharing a fingerprint and bucket pair are indistinguishable
+/// ("twins"): inserting the second is a no-op, and removing one removes
+/// both — only delete items you inserted, as the paper prescribes.
+///
+/// `Merge` is deliberately not implemented: merging requires re-inserting
+/// fingerprints, which can fail at high load, and [`crate::error::MergeError`]
+/// cannot express capacity exhaustion.
+///
 /// # References
 ///
 /// - Bin Fan, Dave G. Andersen, Michael Kaminsky, and Michael D. Mitzenmacher,
@@ -59,8 +70,8 @@ pub struct CuckooGeometry {
 /// - Rasmus Pagh and Flemming Friche Rodler, "Cuckoo Hashing", ESA 2001.
 ///   <https://doi.org/10.1007/3-540-44676-1_10>
 #[derive(Clone, Debug)]
-pub struct CuckooFilter<S = DefaultBuildHasher> {
-    buckets: BucketArray<u64>,
+pub struct CuckooFilter<F: Fingerprint = u16, S = DefaultBuildHasher> {
+    buckets: BucketArray<F>,
     geometry: CuckooGeometry,
     seed_fingerprint: u64,
     hasher: S,
@@ -68,31 +79,19 @@ pub struct CuckooFilter<S = DefaultBuildHasher> {
     rng: XorShift64,
 }
 
-impl CuckooFilter<DefaultBuildHasher> {
-    /// Creates a Cuckoo filter with explicit geometry and seed.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `geometry` is invalid.
-    pub fn from_geometry(geometry: CuckooGeometry, seed: u64) -> Self {
-        let hasher = DefaultBuildHasher::new(seed);
-        Self::from_parts(
-            geometry,
-            hasher.seed_fingerprint(),
-            hasher,
-            XorShift64::new(seed ^ 0xa5a5_5a5a_d3c3_b4b4),
-        )
-    }
-
+impl CuckooFilter<u16, DefaultBuildHasher> {
     /// Creates a Cuckoo filter from capacity and target FPP.
     ///
-    /// Uses four slots per bucket and a 95% target load factor.
+    /// Uses four slots per bucket and a 95% target load factor. The stored
+    /// fingerprints are `u16`, which reaches target FPPs down to about
+    /// 1.3e-4. For a different fingerprint width, build explicit geometry
+    /// with [`CuckooGeometry::for_capacity_with_bits`] and call
+    /// [`CuckooFilter::from_geometry`] on the chosen `F`.
     ///
     /// # Panics
     ///
-    /// Panics if `expected_items` is zero, if `false_positive_rate` is not in
-    /// `0.0..1.0`, or if the target FPP would require more than 63 fingerprint
-    /// bits.
+    /// Panics if `expected_items` is zero or if `false_positive_rate` is not
+    /// in `0.0..1.0`.
     pub fn with_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
         Self::with_capacity_and_seed(expected_items, false_positive_rate, 0)
     }
@@ -108,18 +107,37 @@ impl CuckooFilter<DefaultBuildHasher> {
         seed: u64,
     ) -> Self {
         Self::from_geometry(
-            CuckooGeometry::for_capacity(expected_items, false_positive_rate),
+            CuckooGeometry::for_capacity_with_bits(expected_items, false_positive_rate, 16),
             seed,
         )
     }
 }
 
-impl<S> CuckooFilter<S> {
+impl<F: Fingerprint> CuckooFilter<F, DefaultBuildHasher> {
+    /// Creates a Cuckoo filter with explicit geometry and seed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `geometry` is invalid or if its fingerprint width differs
+    /// from `F`'s.
+    pub fn from_geometry(geometry: CuckooGeometry, seed: u64) -> Self {
+        let hasher = DefaultBuildHasher::new(seed);
+        Self::from_parts(
+            geometry,
+            hasher.seed_fingerprint(),
+            hasher,
+            XorShift64::new(seed ^ 0xa5a5_5a5a_d3c3_b4b4),
+        )
+    }
+}
+
+impl<F: Fingerprint, S> CuckooFilter<F, S> {
     /// Creates a Cuckoo filter from explicit components.
     ///
     /// # Panics
     ///
-    /// Panics if `geometry` is invalid.
+    /// Panics if `geometry` is invalid or if its fingerprint width differs
+    /// from `F`'s.
     pub fn from_parts(
         geometry: CuckooGeometry,
         seed_fingerprint: u64,
@@ -127,6 +145,13 @@ impl<S> CuckooFilter<S> {
         rng: XorShift64,
     ) -> Self {
         geometry.validate();
+        assert_eq!(
+            geometry.fingerprint_bits,
+            F::BITS,
+            "geometry fingerprint width {} does not match fingerprint type width {}",
+            geometry.fingerprint_bits,
+            F::BITS
+        );
         Self {
             buckets: BucketArray::new(geometry.buckets, geometry.slots_per_bucket),
             geometry,
@@ -173,16 +198,19 @@ impl<S> CuckooFilter<S> {
         self.buckets.clear();
     }
 
-    fn alternate_bucket(&self, bucket: usize, fingerprint: u64) -> usize {
-        PartialKeyCuckoo::alt_bucket(bucket, fingerprint, self.geometry.buckets)
+    fn alternate_bucket(&self, bucket: usize, fingerprint: F) -> usize {
+        PartialKeyCuckoo::alt_bucket(bucket, fingerprint.to_u64(), self.geometry.buckets)
     }
 }
 
-impl<S> CuckooFilter<S>
+impl<F: Fingerprint, S> CuckooFilter<F, S>
 where
     S: BuildHasher,
 {
     /// Inserts `item`.
+    ///
+    /// If a matching fingerprint already occupies one of the item's buckets,
+    /// the insert is deduplicated and succeeds immediately.
     ///
     /// # Errors
     ///
@@ -218,7 +246,7 @@ where
             bucket = self.alternate_bucket(bucket, fp);
         }
 
-        Err(SketchFull::new(fp))
+        Err(SketchFull::new(fp.to_u64()))
     }
 
     /// Returns whether `item` may be present.
@@ -231,6 +259,9 @@ where
     }
 
     /// Removes `item`, returning whether a fingerprint was cleared.
+    ///
+    /// Removing an item that was never inserted may clear a fingerprint that
+    /// belongs to a different item; only remove items known to be present.
     pub fn remove_item<T>(&mut self, item: &T) -> bool
     where
         T: Hash + ?Sized,
@@ -239,12 +270,12 @@ where
         self.buckets.remove(first, fingerprint) || self.buckets.remove(second, fingerprint)
     }
 
-    fn fingerprint_and_buckets<T>(&self, item: &T) -> (u64, usize, usize)
+    fn fingerprint_and_buckets<T>(&self, item: &T) -> (F, usize, usize)
     where
         T: Hash + ?Sized,
     {
         let hash = hash_one(&self.hasher, item);
-        let fingerprint = PartialKeyCuckoo::fingerprint(self.geometry.fingerprint_bits, hash);
+        let fingerprint = PartialKeyCuckoo::typed_fingerprint::<F>(hash);
         let first = PartialKeyCuckoo::bucket(hash, self.geometry.buckets);
         let second = self.alternate_bucket(first, fingerprint);
         (fingerprint, first, second)
@@ -252,16 +283,35 @@ where
 }
 
 impl CuckooGeometry {
-    /// Computes Cuckoo geometry from capacity and target FPP.
+    /// Computes Cuckoo geometry from capacity and target FPP, using the
+    /// default 16-bit (`u16`) fingerprint width.
     ///
-    /// Uses four slots per bucket and rounds bucket count up to a power of two.
+    /// # Panics
+    ///
+    /// Panics under the same conditions as
+    /// [`Self::for_capacity_with_bits`].
+    pub fn for_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
+        Self::for_capacity_with_bits(expected_items, false_positive_rate, 16)
+    }
+
+    /// Computes Cuckoo geometry from capacity, target FPP, and fingerprint
+    /// width.
+    ///
+    /// Uses four slots per bucket and rounds bucket count up to a power of
+    /// two. The stored width is `fingerprint_bits`; the width only needs to
+    /// be large enough that the fingerprint-collision bound
+    /// `2 * slots / 2^bits` meets the target FPP.
     ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero, if `false_positive_rate` is not in
-    /// `0.0..1.0`, or if the target FPP would require more than 63 fingerprint
-    /// bits.
-    pub fn for_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
+    /// `0.0..1.0`, if `fingerprint_bits` is not in `1..=64`, or if the width
+    /// cannot reach the target FPP.
+    pub fn for_capacity_with_bits(
+        expected_items: u64,
+        false_positive_rate: f64,
+        fingerprint_bits: u32,
+    ) -> Self {
         assert!(
             expected_items > 0,
             "expected item count must be greater than zero"
@@ -272,7 +322,17 @@ impl CuckooGeometry {
                 && false_positive_rate < 1.0,
             "false-positive rate must be finite and in 0.0..1.0"
         );
+        assert!(
+            (1..=64).contains(&fingerprint_bits),
+            "fingerprint width must be in 1..=64 bits"
+        );
         let slots_per_bucket = 4;
+        let achievable =
+            (2 * slots_per_bucket) as f64 / 2_f64.powi(fingerprint_bits as i32);
+        assert!(
+            achievable <= false_positive_rate,
+            "fingerprint width {fingerprint_bits} bits cannot reach target false-positive rate {false_positive_rate} with {slots_per_bucket} slots per bucket; use a wider fingerprint type"
+        );
         let load = 0.95;
         let needed_buckets = ((expected_items as f64) / (slots_per_bucket as f64 * load)).ceil();
         assert!(
@@ -280,17 +340,10 @@ impl CuckooGeometry {
             "computed Cuckoo bucket count does not fit in usize"
         );
         let buckets = (needed_buckets.max(1.0) as usize).next_power_of_two();
-        let fingerprint_bits = (((2 * slots_per_bucket) as f64) / false_positive_rate)
-            .log2()
-            .ceil();
-        assert!(
-            fingerprint_bits.is_finite() && fingerprint_bits <= 63.0,
-            "target false-positive rate requires more than 63 fingerprint bits"
-        );
         Self {
             buckets,
             slots_per_bucket,
-            fingerprint_bits: fingerprint_bits.max(1.0) as u32,
+            fingerprint_bits,
             max_kicks: KickLoop::default().max_kicks,
         }
     }
@@ -300,7 +353,7 @@ impl CuckooGeometry {
     /// # Panics
     ///
     /// Panics if buckets or slots are zero, if buckets is not a power of two,
-    /// if fingerprint bits is not in `1..=63`, or if `max_kicks` is zero.
+    /// if fingerprint bits is not in `1..=64`, or if `max_kicks` is zero.
     pub fn validate(self) {
         assert!(
             self.buckets > 0,
@@ -315,8 +368,8 @@ impl CuckooGeometry {
             "Cuckoo slots per bucket must be greater than zero"
         );
         assert!(
-            (1..=63).contains(&self.fingerprint_bits),
-            "Cuckoo fingerprint bits must be in 1..=63"
+            (1..=64).contains(&self.fingerprint_bits),
+            "Cuckoo fingerprint bits must be in 1..=64"
         );
         assert!(
             self.max_kicks > 0,
@@ -325,7 +378,7 @@ impl CuckooGeometry {
     }
 }
 
-impl<S> Sketch for CuckooFilter<S> {
+impl<F: Fingerprint, S> Sketch for CuckooFilter<F, S> {
     fn clear(&mut self) {
         self.clear();
     }
@@ -339,7 +392,7 @@ impl<S> Sketch for CuckooFilter<S> {
     }
 }
 
-impl<T, S> Insert<T> for CuckooFilter<S>
+impl<T, F: Fingerprint, S> Insert<T> for CuckooFilter<F, S>
 where
     T: Hash + ?Sized,
     S: BuildHasher,
@@ -351,7 +404,7 @@ where
     }
 }
 
-impl<T, S> Contains<T> for CuckooFilter<S>
+impl<T, F: Fingerprint, S> Contains<T> for CuckooFilter<F, S>
 where
     T: Hash + ?Sized,
     S: BuildHasher,
@@ -361,7 +414,7 @@ where
     }
 }
 
-impl<T, S> Remove<T> for CuckooFilter<S>
+impl<T, F: Fingerprint, S> Remove<T> for CuckooFilter<F, S>
 where
     T: Hash + ?Sized,
     S: BuildHasher,
@@ -397,14 +450,60 @@ mod tests {
     }
 
     #[test]
+    fn default_fingerprint_is_u16_and_storage_matches() {
+        let filter = CuckooFilter::with_capacity(1_000, 0.01);
+        let geometry = filter.geometry();
+        assert_eq!(geometry.fingerprint_bits, 16);
+        assert_eq!(
+            filter.storage_bytes(),
+            geometry.buckets * geometry.slots_per_bucket * size_of::<u16>()
+        );
+    }
+
+    #[test]
+    fn narrower_fingerprint_types_work() {
+        let geometry = CuckooGeometry {
+            buckets: 64,
+            slots_per_bucket: 4,
+            fingerprint_bits: 8,
+            max_kicks: 10,
+        };
+        let mut filter = CuckooFilter::<u8>::from_geometry(geometry, 3);
+        filter.insert_item(&7_u64).unwrap();
+
+        assert!(filter.contains_item(&7_u64));
+        assert!(filter.remove_item(&7_u64));
+        assert!(!filter.contains_item(&7_u64));
+    }
+
+    #[test]
+    #[should_panic(expected = "does not match fingerprint type width")]
+    fn geometry_width_must_match_fingerprint_type() {
+        let geometry = CuckooGeometry {
+            buckets: 64,
+            slots_per_bucket: 4,
+            fingerprint_bits: 12,
+            max_kicks: 10,
+        };
+        CuckooFilter::<u8>::from_geometry(geometry, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot reach target false-positive rate")]
+    fn narrow_fingerprint_rejects_tight_fpp() {
+        // 8-bit fingerprints cannot reach below 8/2^8 = 0.03125.
+        CuckooGeometry::for_capacity_with_bits(128, 0.01, 8);
+    }
+
+    #[test]
     fn tiny_filter_can_report_full() {
         let geometry = CuckooGeometry {
             buckets: 1,
             slots_per_bucket: 1,
-            fingerprint_bits: 4,
+            fingerprint_bits: 16,
             max_kicks: 1,
         };
-        let mut filter = CuckooFilter::from_geometry(geometry, 0);
+        let mut filter: CuckooFilter = CuckooFilter::from_geometry(geometry, 0);
         filter.insert_item(&0_u64).unwrap();
 
         let mut saw_full = false;
