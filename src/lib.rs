@@ -6,6 +6,7 @@
 
 #![deny(missing_docs)]
 
+pub mod block;
 pub mod error;
 pub mod traits;
 
