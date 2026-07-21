@@ -1,0 +1,432 @@
+//! Count-Min Sketch implementation.
+
+use std::convert::Infallible;
+use std::hash::{BuildHasher, Hash};
+use std::marker::PhantomData;
+
+use crate::block::{Matrix, PackedArray};
+use crate::error::MergeError;
+use crate::hash::{DefaultBuildHasher, hash_one, row_index};
+use crate::policy::{ConservativeUpdate, PlainUpdate};
+use crate::traits::{EstimateCount, Insert, Merge, Sketch};
+
+/// Explicit Count-Min geometry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CountMinGeometry {
+    /// Number of counters in each row.
+    pub width: usize,
+    /// Number of independently indexed rows.
+    pub depth: usize,
+}
+
+/// A Count-Min Sketch for approximate point-frequency queries.
+///
+/// Count-Min stores a matrix of unsigned counters. Each inserted item touches
+/// one counter per row. A query reads the same counters and returns their
+/// minimum. Counter collisions can only increase cells, so the estimate never
+/// underestimates when counters do not saturate.
+///
+/// ```text
+/// insert("x")
+///      |
+///      v
+///   hash("x")
+///      |
+///      +--> row 0 -> col 4 -> increment
+///      +--> row 1 -> col 1 -> increment
+///      +--> row 2 -> col 7 -> increment
+///
+/// rows:
+///   r0 [0 0 0 0 5 0 0 0]
+///   r1 [0 3 0 0 0 0 0 0]
+///   r2 [0 0 0 0 0 0 0 4]
+///
+/// estimate("x") = min(5, 3, 4) = 3
+/// ```
+///
+/// With [`PlainUpdate`], every addressed cell is incremented. With
+/// [`ConservativeUpdate`], the sketch first reads all addressed cells and
+/// increments only cells equal to the current minimum, reducing overestimation
+/// bias while preserving the same query path.
+///
+/// # References
+///
+/// - Graham Cormode and S. Muthukrishnan, "An Improved Data Stream Summary:
+///   The Count-Min Sketch and its Applications", Journal of Algorithms, 2005.
+///   <https://doi.org/10.1016/j.jalgor.2003.12.001>
+/// - Cristian Estan and George Varghese, "New Directions in Traffic
+///   Measurement and Accounting", SIGCOMM 2002. <https://doi.org/10.1145/633025.633056>
+#[derive(Clone, Debug)]
+pub struct CountMinSketch<const BITS: u32 = 32, S = DefaultBuildHasher, U = PlainUpdate> {
+    rows: Matrix<PackedArray<BITS>>,
+    geometry: CountMinGeometry,
+    seed_fingerprint: u64,
+    hasher: S,
+    update: PhantomData<U>,
+    total_count: u64,
+}
+
+impl CountMinSketch<32, DefaultBuildHasher, PlainUpdate> {
+    /// Creates a plain Count-Min Sketch with explicit geometry and seed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `geometry` has zero width or zero depth.
+    pub fn from_geometry(geometry: CountMinGeometry, seed: u64) -> Self {
+        let hasher = DefaultBuildHasher::new(seed);
+        Self::from_parts(geometry, hasher.seed_fingerprint(), hasher, PlainUpdate)
+    }
+
+    /// Creates a plain Count-Min Sketch from target error parameters.
+    ///
+    /// `epsilon` controls additive error and `delta` controls failure
+    /// probability.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    pub fn with_error(epsilon: f64, delta: f64) -> Self {
+        Self::with_error_and_seed(epsilon, delta, 0)
+    }
+
+    /// Creates a seeded plain Count-Min Sketch from target error parameters.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    pub fn with_error_and_seed(epsilon: f64, delta: f64, seed: u64) -> Self {
+        Self::from_geometry(CountMinGeometry::for_error(epsilon, delta), seed)
+    }
+
+    /// Creates a conservative-update Count-Min Sketch with explicit geometry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `geometry` has zero width or zero depth.
+    pub fn conservative_from_geometry(
+        geometry: CountMinGeometry,
+        seed: u64,
+    ) -> CountMinSketch<32, DefaultBuildHasher, ConservativeUpdate> {
+        let hasher = DefaultBuildHasher::new(seed);
+        CountMinSketch::from_parts(
+            geometry,
+            hasher.seed_fingerprint(),
+            hasher,
+            ConservativeUpdate,
+        )
+    }
+
+    /// Creates a conservative-update Count-Min Sketch from target parameters.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    pub fn conservative_with_error(
+        epsilon: f64,
+        delta: f64,
+    ) -> CountMinSketch<32, DefaultBuildHasher, ConservativeUpdate> {
+        Self::conservative_with_error_and_seed(epsilon, delta, 0)
+    }
+
+    /// Creates a seeded conservative-update Count-Min Sketch.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    pub fn conservative_with_error_and_seed(
+        epsilon: f64,
+        delta: f64,
+        seed: u64,
+    ) -> CountMinSketch<32, DefaultBuildHasher, ConservativeUpdate> {
+        Self::conservative_from_geometry(CountMinGeometry::for_error(epsilon, delta), seed)
+    }
+}
+
+impl<const BITS: u32, S, U> CountMinSketch<BITS, S, U> {
+    /// Creates a Count-Min Sketch from explicit components.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `geometry` has zero width or zero depth, or if `BITS` is not
+    /// in `1..=64`.
+    pub fn from_parts(
+        geometry: CountMinGeometry,
+        seed_fingerprint: u64,
+        hasher: S,
+        update: U,
+    ) -> Self {
+        geometry.validate();
+        let rows = (0..geometry.depth)
+            .map(|_| PackedArray::<BITS>::new(geometry.width))
+            .collect();
+        Self {
+            rows: Matrix::from_rows(rows, geometry.width),
+            geometry,
+            seed_fingerprint,
+            hasher,
+            update: {
+                let _ = update;
+                PhantomData
+            },
+            total_count: 0,
+        }
+    }
+
+    /// Returns the realized geometry.
+    pub const fn geometry(&self) -> CountMinGeometry {
+        self.geometry
+    }
+
+    /// Returns the seed fingerprint used by merge compatibility checks.
+    pub const fn seed_fingerprint(&self) -> u64 {
+        self.seed_fingerprint
+    }
+
+    /// Returns the total number of inserted events, saturated at `u64::MAX`.
+    pub const fn total_count(&self) -> u64 {
+        self.total_count
+    }
+
+    /// Returns the byte length of the counter storage.
+    pub fn storage_bytes(&self) -> usize {
+        self.rows.iter().map(PackedArray::storage_bytes).sum()
+    }
+
+    /// Clears all counters and the total insert count.
+    pub fn clear(&mut self) {
+        for row in self.rows.iter_mut() {
+            row.clear();
+        }
+        self.total_count = 0;
+    }
+
+    fn row_indices(&self, hash: u64) -> impl Iterator<Item = usize> + '_ {
+        (0..self.geometry.depth).map(move |row| row_index(hash, row, self.geometry.width))
+    }
+}
+
+impl<const BITS: u32, S, U> CountMinSketch<BITS, S, U>
+where
+    S: BuildHasher,
+{
+    /// Estimates the frequency of `item`.
+    pub fn estimate_item<T>(&self, item: &T) -> u64
+    where
+        T: Hash + ?Sized,
+    {
+        let hash = hash_one(&self.hasher, item);
+        self.row_indices(hash)
+            .enumerate()
+            .map(|(row, index)| self.rows.row(row).get(index))
+            .min()
+            .unwrap_or(0)
+    }
+}
+
+impl<const BITS: u32, S> CountMinSketch<BITS, S, PlainUpdate>
+where
+    S: BuildHasher,
+{
+    /// Inserts one occurrence of `item` with the plain update rule.
+    pub fn insert_item<T>(&mut self, item: &T)
+    where
+        T: Hash + ?Sized,
+    {
+        let hash = hash_one(&self.hasher, item);
+        let indices: Vec<_> = self.row_indices(hash).collect();
+        for (row, index) in indices.into_iter().enumerate() {
+            let current = self.rows.row(row).get(index);
+            self.rows.row_mut(row).set(
+                index,
+                current.saturating_add(1).min(PackedArray::<BITS>::MAX),
+            );
+        }
+        self.total_count = self.total_count.saturating_add(1);
+    }
+}
+
+impl<const BITS: u32, S> CountMinSketch<BITS, S, ConservativeUpdate>
+where
+    S: BuildHasher,
+{
+    /// Inserts one occurrence of `item` with conservative update.
+    pub fn insert_item<T>(&mut self, item: &T)
+    where
+        T: Hash + ?Sized,
+    {
+        let hash = hash_one(&self.hasher, item);
+        let indices: Vec<_> = self.row_indices(hash).collect();
+        let minimum = indices
+            .iter()
+            .enumerate()
+            .map(|(row, &index)| self.rows.row(row).get(index))
+            .min()
+            .unwrap_or(0);
+
+        for (row, index) in indices.into_iter().enumerate() {
+            let current = self.rows.row(row).get(index);
+            if current == minimum {
+                self.rows.row_mut(row).set(
+                    index,
+                    current.saturating_add(1).min(PackedArray::<BITS>::MAX),
+                );
+            }
+        }
+        self.total_count = self.total_count.saturating_add(1);
+    }
+}
+
+impl CountMinGeometry {
+    /// Computes Count-Min geometry from target error parameters.
+    ///
+    /// Uses `width = ceil(e / epsilon)` and `depth = ceil(ln(1 / delta))`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    pub fn for_error(epsilon: f64, delta: f64) -> Self {
+        assert!(
+            epsilon.is_finite() && epsilon > 0.0 && epsilon < 1.0,
+            "epsilon must be finite and in 0.0..1.0"
+        );
+        assert!(
+            delta.is_finite() && delta > 0.0 && delta < 1.0,
+            "delta must be finite and in 0.0..1.0"
+        );
+        let width = (std::f64::consts::E / epsilon).ceil();
+        let depth = (1.0 / delta).ln().ceil();
+        assert!(
+            width <= usize::MAX as f64 && depth <= usize::MAX as f64,
+            "computed Count-Min geometry does not fit in usize"
+        );
+        Self {
+            width: width.max(1.0) as usize,
+            depth: depth.max(1.0) as usize,
+        }
+    }
+
+    /// Validates that both geometry dimensions are non-zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width` or `depth` is zero.
+    pub fn validate(self) {
+        assert!(self.width > 0, "Count-Min width must be greater than zero");
+        assert!(self.depth > 0, "Count-Min depth must be greater than zero");
+    }
+}
+
+impl<const BITS: u32, S, U> Sketch for CountMinSketch<BITS, S, U> {
+    fn clear(&mut self) {
+        self.clear();
+    }
+
+    fn len_hint(&self) -> Option<u64> {
+        Some(self.total_count)
+    }
+
+    fn storage_bytes(&self) -> usize {
+        self.storage_bytes()
+    }
+}
+
+impl<T, const BITS: u32, S> Insert<T> for CountMinSketch<BITS, S, PlainUpdate>
+where
+    T: Hash + ?Sized,
+    S: BuildHasher,
+{
+    type Err = Infallible;
+
+    fn insert(&mut self, item: &T) -> Result<(), Self::Err> {
+        self.insert_item(item);
+        Ok(())
+    }
+}
+
+impl<T, const BITS: u32, S> Insert<T> for CountMinSketch<BITS, S, ConservativeUpdate>
+where
+    T: Hash + ?Sized,
+    S: BuildHasher,
+{
+    type Err = Infallible;
+
+    fn insert(&mut self, item: &T) -> Result<(), Self::Err> {
+        self.insert_item(item);
+        Ok(())
+    }
+}
+
+impl<T, const BITS: u32, S, U> EstimateCount<T> for CountMinSketch<BITS, S, U>
+where
+    T: Hash + ?Sized,
+    S: BuildHasher,
+{
+    fn estimate(&self, item: &T) -> u64 {
+        self.estimate_item(item)
+    }
+}
+
+impl<const BITS: u32, S, U> Merge for CountMinSketch<BITS, S, U> {
+    fn merge_from(&mut self, other: &Self) -> Result<(), MergeError> {
+        if self.geometry != other.geometry {
+            return Err(MergeError::GeometryMismatch);
+        }
+        if self.seed_fingerprint != other.seed_fingerprint {
+            return Err(MergeError::SeedMismatch);
+        }
+        for row in 0..self.geometry.depth {
+            self.rows
+                .row_mut(row)
+                .merge_with(other.rows.row(row), |a, b| {
+                    a.saturating_add(b).min(PackedArray::<BITS>::MAX)
+                });
+        }
+        self.total_count = self.total_count.saturating_add(other.total_count);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CountMinGeometry, CountMinSketch};
+    use crate::traits::{EstimateCount, Insert, Merge};
+
+    #[test]
+    fn plain_count_min_never_underestimates_inserted_counts() {
+        let mut sketch = CountMinSketch::with_error(0.01, 0.01);
+        for _ in 0..10 {
+            sketch.insert_item("a");
+        }
+        for _ in 0..3 {
+            sketch.insert_item("b");
+        }
+
+        assert!(sketch.estimate_item("a") >= 10);
+        assert!(sketch.estimate_item("b") >= 3);
+        assert_eq!(sketch.total_count(), 13);
+    }
+
+    #[test]
+    fn conservative_update_uses_same_query_capability() {
+        let mut sketch = CountMinSketch::conservative_with_error(0.01, 0.01);
+        Insert::<str>::insert(&mut sketch, "a").unwrap();
+        Insert::<str>::insert(&mut sketch, "a").unwrap();
+
+        assert!(EstimateCount::<str>::estimate(&sketch, "a") >= 2);
+    }
+
+    #[test]
+    fn merge_combines_rows() {
+        let geometry = CountMinGeometry {
+            width: 128,
+            depth: 4,
+        };
+        let mut left = CountMinSketch::from_geometry(geometry, 1);
+        let mut right = CountMinSketch::from_geometry(geometry, 1);
+        left.insert_item("a");
+        right.insert_item("a");
+
+        left.merge_from(&right).unwrap();
+        assert!(left.estimate_item("a") >= 2);
+    }
+}
