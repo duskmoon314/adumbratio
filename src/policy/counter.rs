@@ -18,6 +18,7 @@ pub trait CounterPolicy {
 /// `max` leaves it at `max`, which preserves the counting-Bloom invariant that
 /// saturated counters are sticky and cannot create false negatives.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Saturating;
 
 impl CounterPolicy for Saturating {
@@ -42,6 +43,7 @@ impl CounterPolicy for Saturating {
 ///
 /// Operations panic on overflow or underflow instead of saturating.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Checked;
 
 impl CounterPolicy for Checked {

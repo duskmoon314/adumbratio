@@ -4,6 +4,7 @@
 /// The cell width is a const generic so arrays with different widths are
 /// distinct types.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PackedArray<const BITS: u32> {
     words: Box<[u64]>,
     len: usize,

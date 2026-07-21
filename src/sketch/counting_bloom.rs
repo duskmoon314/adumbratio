@@ -43,6 +43,7 @@ use super::BloomGeometry;
 /// - Burton H. Bloom, "Space/time trade-offs in hash coding with allowable
 ///   errors", Communications of the ACM, 1970. <https://doi.org/10.1145/362686.362692>
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CountingBloomFilter<
     const BITS: u32 = 4,
     S = DefaultBuildHasher,

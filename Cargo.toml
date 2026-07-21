@@ -4,10 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"], optional = true }
 
 [dev-dependencies]
+bincode = "1.3"
 criterion = "0.8.2"
 
 [[bench]]
 name = "sketch_ops"
 harness = false
+
+[features]
+default = ["std"]
+std = ["serde?/std"]
+serde = ["dep:serde"]

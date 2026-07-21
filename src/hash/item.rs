@@ -9,6 +9,7 @@ use super::mix64;
 /// This hasher is intentionally small and stable. It is not a cryptographic
 /// hash and should not be used as a hash-flooding defense.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DefaultBuildHasher {
     seed: u64,
 }

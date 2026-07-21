@@ -10,6 +10,7 @@ use crate::traits::{Contains, Insert, Remove, Sketch};
 
 /// Explicit Cuckoo filter geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CuckooGeometry {
     /// Number of buckets. Must be a power of two.
     pub buckets: usize,
@@ -70,6 +71,7 @@ pub struct CuckooGeometry {
 /// - Rasmus Pagh and Flemming Friche Rodler, "Cuckoo Hashing", ESA 2001.
 ///   <https://doi.org/10.1007/3-540-44676-1_10>
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CuckooFilter<F: Fingerprint = u16, S = DefaultBuildHasher> {
     buckets: BucketArray<F>,
     geometry: CuckooGeometry,

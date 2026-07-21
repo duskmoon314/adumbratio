@@ -10,6 +10,7 @@ use crate::traits::{Contains, EstimateCardinality, Insert, Merge, Sketch};
 
 /// Explicit Bloom filter geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BloomGeometry {
     /// Number of bits in the filter.
     pub bits: usize,
@@ -50,6 +51,7 @@ pub struct BloomGeometry {
 /// - Adam Kirsch and Michael Mitzenmacher, "Less Hashing, Same Performance:
 ///   Building a Better Bloom Filter", ESA 2006. <https://doi.org/10.1007/11841036_21>
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BloomFilter<S = DefaultBuildHasher, I = DoubleHashing> {
     bits: BitArray,
     geometry: BloomGeometry,

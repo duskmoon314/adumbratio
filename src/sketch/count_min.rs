@@ -12,6 +12,7 @@ use crate::traits::{EstimateCount, Insert, Merge, Sketch};
 
 /// Explicit Count-Min geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CountMinGeometry {
     /// Number of counters in each row.
     pub width: usize,
@@ -57,6 +58,7 @@ pub struct CountMinGeometry {
 /// - Cristian Estan and George Varghese, "New Directions in Traffic
 ///   Measurement and Accounting", SIGCOMM 2002. <https://doi.org/10.1145/633025.633056>
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CountMinSketch<const BITS: u32 = 32, S = DefaultBuildHasher, U = PlainUpdate> {
     rows: Matrix<PackedArray<BITS>>,
     geometry: CountMinGeometry,

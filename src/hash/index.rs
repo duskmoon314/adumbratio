@@ -18,6 +18,7 @@ pub trait IndexScheme {
 /// `h1 + i * h2`, reduced into the target range. It is the default index
 /// scheme for Bloom-style filters in this crate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct DoubleHashing;
 
 impl IndexScheme for DoubleHashing {
@@ -63,6 +64,7 @@ impl Iterator for DoubleHashIter {
 /// which removes the small-range artifacts of plain double hashing at
 /// negligible cost.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EnhancedDoubleHashing;
 
 impl IndexScheme for EnhancedDoubleHashing {
@@ -117,6 +119,7 @@ impl Iterator for EnhancedDoubleHashIter {
 /// Panics if `m` is zero or smaller than `k`, since every partition must be
 /// non-empty.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Partitioned;
 
 impl IndexScheme for Partitioned {
@@ -171,6 +174,7 @@ impl Iterator for PartitionedIter {
 /// If the range length is not a multiple of `block_bits`, the last block is
 /// smaller and its indices are reduced into the available tail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Blocked {
     block_bits: usize,
 }

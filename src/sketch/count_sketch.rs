@@ -10,6 +10,7 @@ use crate::traits::{EstimateCount, Insert, Merge, Sketch};
 
 /// Explicit Count Sketch geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CountSketchGeometry {
     /// Number of signed counters in each row.
     pub width: usize,
@@ -52,6 +53,7 @@ pub struct CountSketchGeometry {
 ///   Items in Data Streams", Theoretical Computer Science, 2004.
 ///   <https://doi.org/10.1016/j.tcs.2003.10.024>
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CountSketch<S = DefaultBuildHasher> {
     rows: Matrix<PackedArray<64>>,
     geometry: CountSketchGeometry,

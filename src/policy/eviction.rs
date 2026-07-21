@@ -21,6 +21,7 @@ pub trait RngLite {
 /// This generator is for repeatable sketch eviction only. It is not
 /// cryptographically secure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct XorShift64 {
     state: u64,
 }
@@ -56,6 +57,7 @@ impl RngLite for XorShift64 {
 
 /// Bound for the Cuckoo filter displacement loop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct KickLoop {
     /// Maximum number of evictions attempted by one insertion.
     pub max_kicks: usize,

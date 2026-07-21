@@ -62,6 +62,7 @@ impl_fingerprint!(u64);
 
 /// Fixed-size buckets of fingerprint slots.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BucketArray<F: Fingerprint> {
     slots: Box<[F]>,
     buckets: usize,

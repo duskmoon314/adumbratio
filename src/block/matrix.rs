@@ -3,6 +3,7 @@
 /// `Matrix` is intentionally thin: it owns row objects and records the row
 /// width that indexing schemes use. It does not impose cell semantics.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Matrix<A> {
     rows: Vec<A>,
     width: usize,

@@ -4,6 +4,7 @@
 /// block used by Bloom-style sketches and by custom compositions that need a
 /// dense set of boolean cells.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BitArray {
     words: Box<[u64]>,
     len: usize,

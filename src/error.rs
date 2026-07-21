@@ -4,6 +4,7 @@ use std::fmt;
 
 /// Error returned when two sketches cannot be merged safely.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum MergeError {
     /// The sketches use different geometry, such as bit count or row width.
     GeometryMismatch,
@@ -24,6 +25,7 @@ impl std::error::Error for MergeError {}
 
 /// Error returned when a bucket cannot accept another fingerprint.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BucketFull;
 
 impl fmt::Display for BucketFull {
@@ -36,6 +38,7 @@ impl std::error::Error for BucketFull {}
 
 /// Error returned when a bounded sketch cannot accept another item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SketchFull {
     orphaned_fingerprint: u64,
 }
