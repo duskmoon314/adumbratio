@@ -6,7 +6,7 @@
 
 use adumbratio::sketch::{
     BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter, HyperLogLog, MinHash,
+    CuckooFilter, HyperLogLog, MinHash, TopK,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -112,6 +112,19 @@ fn minhash_round_trip_preserves_signature() {
     }
     let restored: MinHash = round_trip(&sketch);
     assert_eq!(restored.signature(), sketch.signature());
+}
+
+#[test]
+fn top_k_round_trip_preserves_candidates() {
+    let mut top = TopK::<u64>::new(10, 0.001, 0.01);
+    for item in 0..100_u64 {
+        for _ in 0..(1000 / (item + 1)) {
+            top.insert_item(&item);
+        }
+    }
+    let restored: TopK<u64> = round_trip(&top);
+    assert_eq!(restored.top_k(), top.top_k());
+    assert_eq!(restored.total_count(), top.total_count());
 }
 
 #[test]

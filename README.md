@@ -50,12 +50,13 @@ blocks when a workload needs a custom composition.
 | Blocked Bloom filter | membership, cache-friendly | `BitArray` + `Blocked` scheme | ✅ 4 |
 | HyperLogLog | cardinality (1.04/√m error) | `PackedArray<6>` registers + max update | ✅ 5 |
 | MinHash | set similarity (1/√k error) | k hash-derivation minima + element-wise min merge | ✅ 5 |
+| TopK | heavy hitters | `CountMinSketch` + candidate set | ✅ 5 |
 
 ## Planned sketches
 
-| Sketch | Answers | Built from | Stage |
-|---|---|---|---|
-| top-k companion | heavy hitters | `CountMinSketch` + candidate heap | 5 |
+Nothing else on the current roadmap — see
+[DESIGN.md](DESIGN.md#11-roadmap) for what comes next (benchmarks against
+existing crates, 0.1 release).
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),
 and the integration tests in `tests/` validate the paper's guarantees

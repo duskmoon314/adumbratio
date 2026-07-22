@@ -8,6 +8,7 @@ mod counting_bloom;
 mod cuckoo;
 mod hyperloglog;
 mod minhash;
+mod top_k;
 
 pub use blocked_bloom::BlockedBloomFilter;
 pub use bloom::{BloomFilter, BloomGeometry};
@@ -17,3 +18,4 @@ pub use counting_bloom::CountingBloomFilter;
 pub use cuckoo::{CuckooFilter, CuckooGeometry};
 pub use hyperloglog::HyperLogLog;
 pub use minhash::MinHash;
+pub use top_k::TopK;

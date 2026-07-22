@@ -296,6 +296,29 @@ fn bench_minhash(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_top_k(c: &mut Criterion) {
+    let mut group = c.benchmark_group("top_k");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let mut top = adumbratio::sketch::TopK::new(100, 0.001, 0.01);
+    for item in &present {
+        top.insert_item(item);
+    }
+
+    group.bench_function("insert_k100", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            top.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("top_k_query", |b| {
+        b.iter(|| black_box(top.top_k()));
+    });
+    group.finish();
+}
+
 fn bench_packed_array(c: &mut Criterion) {
     let mut group = c.benchmark_group("packed_array");
     quick(&mut group);
@@ -344,6 +367,7 @@ criterion_group!(
     bench_cuckoo,
     bench_hyperloglog,
     bench_minhash,
+    bench_top_k,
     bench_packed_array,
 );
 criterion_main!(benches);

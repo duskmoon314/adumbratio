@@ -300,6 +300,46 @@ fn minhash_jaccard_within_standard_error() {
 }
 
 #[test]
+fn top_k_recovers_heavy_hitters_on_zipf_stream() {
+    use adumbratio::sketch::TopK;
+
+    let counts = zipf_counts(10_000, 200_000, 11);
+    let mut top = TopK::new(20, 0.001, 0.01);
+    for (item, &count) in counts.iter().enumerate() {
+        for _ in 0..count {
+            top.insert_item(&(item as u64));
+        }
+    }
+
+    let mut order: Vec<usize> = (0..counts.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(counts[i]));
+    let true_top: std::collections::HashSet<u64> =
+        order.iter().take(20).map(|&i| i as u64).collect();
+
+    let reported = top.top_k();
+    assert_eq!(reported.len(), 20);
+    let hits = reported
+        .iter()
+        .filter(|(item, _)| true_top.contains(item))
+        .count();
+    assert!(
+        hits >= 19,
+        "recall@20 = {hits}/20 on a zipf stream: heavy hitters must be recovered"
+    );
+
+    // Reported estimates never underestimate and stay within eps*N.
+    let eps_n = (0.001 * 200_000.0) as u64;
+    for (item, estimate) in &reported {
+        let truth = counts[*item as usize];
+        assert!(*estimate >= truth);
+        assert!(
+            estimate - truth <= eps_n,
+            "item {item}: estimate {estimate} exceeds truth {truth} by more than eps*N"
+        );
+    }
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;
