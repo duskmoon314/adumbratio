@@ -640,6 +640,50 @@ fn ams_f2_estimate_within_error_bound() {
 }
 
 #[test]
+fn misra_gries_and_space_saving_honor_deterministic_bounds() {
+    use adumbratio::sketch::{MisraGries, SpaceSaving};
+
+    let counts = zipf_counts(1_000, 100_000, 11);
+    let n = 100_000_u64;
+    let k = 20_usize;
+    let mut mg = MisraGries::new(k);
+    let mut ss = SpaceSaving::new(k);
+    for (item, &count) in counts.iter().enumerate() {
+        for _ in 0..count {
+            mg.insert_item(&(item as u64));
+            ss.insert_item(&(item as u64));
+        }
+    }
+    let bound = n / (k as u64 + 1);
+
+    // Deterministic guarantees for EVERY item in the universe:
+    // MG: f - bound <= estimate <= f; SS: f <= count <= f + error, error <= bound.
+    for (item, &truth) in counts.iter().enumerate() {
+        let item = item as u64;
+        let mg_est = mg.estimate_item(&item);
+        assert!(
+            mg_est <= truth && mg_est + bound >= truth,
+            "MG item {item}: estimate {mg_est} vs truth {truth} (bound {bound})"
+        );
+        let (count, error) = ss.estimate_with_error(&item);
+        if count > 0 {
+            assert!(
+                count >= truth && count <= truth + error && error <= bound,
+                "SS item {item}: count {count} error {error} vs truth {truth} (bound {bound})"
+            );
+        }
+    }
+
+    // Every item above the bound is tracked in both summaries.
+    for (item, &truth) in counts.iter().enumerate() {
+        if truth > bound {
+            assert!(mg.estimate_item(&(item as u64)) > 0);
+            assert!(ss.estimate_item(&(item as u64)) > 0);
+        }
+    }
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

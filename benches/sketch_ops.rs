@@ -437,6 +437,36 @@ fn bench_ams(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_frequent(c: &mut Criterion) {
+    let mut group = c.benchmark_group("frequent");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+
+    let mut mg = adumbratio::sketch::MisraGries::new(100);
+    let mut ss = adumbratio::sketch::SpaceSaving::new(100);
+    for item in &present {
+        mg.insert_item(item);
+        ss.insert_item(item);
+    }
+
+    group.bench_function("misra_gries_insert_k100", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            mg.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("space_saving_insert_k100", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            ss.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.finish();
+}
+
 fn bench_simhash(c: &mut Criterion) {
     let mut group = c.benchmark_group("simhash");
     quick(&mut group);
@@ -537,6 +567,7 @@ criterion_group!(
     bench_count_min,
     bench_count_sketch,
     bench_cuckoo,
+    bench_frequent,
     bench_hyperloglog,
     bench_kll,
     bench_minhash,

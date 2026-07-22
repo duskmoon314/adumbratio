@@ -57,12 +57,13 @@ blocks when a workload needs a custom composition.
 | theta sketch | cardinality + union/intersection/difference | bottom-k (k smallest hashes) | ✅ 7 |
 | SimHash | cosine similarity | sign pattern of ±1 bit sums (linear merge) | ✅ 7 |
 | AMS sketch | L2 norm / self-join size | tug-of-war signed counters + median-of-means | ✅ 7 |
+| Misra–Gries | deterministic heavy hitters (lower bounds) | k counters + decrement-all | ✅ 7 |
+| Space-Saving | deterministic heavy hitters (upper bounds) | k entries + replace-the-minimum | ✅ 7 |
 
 ## Planned sketches
 
 | Sketch | Answers | Stage |
 |---|---|---|
-| Misra–Gries, Space-Saving | deterministic heavy hitters | 7 |
 | binary fuse / ribbon, b-bit MinHash, DDSketch, IBLT, … | further family breadth | 8 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),

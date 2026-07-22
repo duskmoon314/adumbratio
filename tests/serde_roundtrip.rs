@@ -6,8 +6,8 @@
 
 use adumbratio::sketch::{
     AmsSketch, BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch,
-    CountingBloomFilter, CuckooFilter, HyperLogLog, KllSketch, MinHash, QuotientFilter,
-    SimHash, ThetaSketch, TopK, XorFilter,
+    CountingBloomFilter, CuckooFilter, HyperLogLog, KllSketch, MinHash, MisraGries,
+    QuotientFilter, SimHash, SpaceSaving, ThetaSketch, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -199,6 +199,24 @@ fn ams_round_trip_preserves_counters() {
     let restored: AmsSketch = round_trip(&sketch);
     assert_eq!(restored.counters(), sketch.counters());
     assert_eq!(restored.f2(), sketch.f2());
+}
+
+#[test]
+fn frequent_summaries_round_trip() {
+    let mut mg = MisraGries::<u64>::new(10);
+    let mut ss = SpaceSaving::<u64>::new(10);
+    for item in 0..100_u64 {
+        for _ in 0..(100 / (item + 1)) {
+            mg.insert_item(&item);
+            ss.insert_item(&item);
+        }
+    }
+    let mg_restored: MisraGries<u64> = round_trip(&mg);
+    let ss_restored: SpaceSaving<u64> = round_trip(&ss);
+    assert_eq!(mg_restored.top_k(), mg.top_k());
+    assert_eq!(ss_restored.top_k(), ss.top_k());
+    assert_eq!(mg_restored.total_count(), mg.total_count());
+    assert_eq!(ss_restored.total_count(), ss.total_count());
 }
 
 #[test]
