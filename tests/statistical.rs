@@ -609,6 +609,37 @@ fn simhash_cosine_tracks_incidence_cosine() {
 }
 
 #[test]
+fn ams_f2_estimate_within_error_bound() {
+    use adumbratio::sketch::AmsSketch;
+
+    // Zipf(1) stream: F2 is dominated by the heavy hitters, the regime
+    // where the second moment is interesting.
+    let counts = zipf_counts(1_000, 100_000, 11);
+    let truth: f64 = counts.iter().map(|&c| (c as f64) * (c as f64)).sum();
+
+    let mut sketch = AmsSketch::with_error_and_seed(0.2, 0.01, 5);
+    for (item, &count) in counts.iter().enumerate() {
+        for _ in 0..count {
+            sketch.insert_item(&(item as u64));
+        }
+    }
+
+    // Median-of-means at eps = 0.2; the skew-heavy zipf stream makes the
+    // estimator much more accurate than the worst-case bound in practice.
+    let estimate = sketch.f2();
+    let relative = (estimate - truth).abs() / truth;
+    assert!(
+        relative <= 0.15,
+        "F2 estimate {estimate} vs truth {truth} off by {:.2}%",
+        relative * 100.0
+    );
+
+    // L2 is consistent with F2 by construction.
+    let l2 = sketch.l2_norm();
+    assert!((l2 * l2 - estimate).abs() / estimate <= 0.01);
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

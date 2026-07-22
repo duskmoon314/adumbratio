@@ -5,9 +5,9 @@
 #![cfg(feature = "serde")]
 
 use adumbratio::sketch::{
-    BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter, HyperLogLog, KllSketch, MinHash, QuotientFilter, SimHash, ThetaSketch,
-    TopK, XorFilter,
+    AmsSketch, BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch,
+    CountingBloomFilter, CuckooFilter, HyperLogLog, KllSketch, MinHash, QuotientFilter,
+    SimHash, ThetaSketch, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -186,6 +186,19 @@ fn simhash_round_trip_preserves_signature() {
     let restored: SimHash = round_trip(&sketch);
     assert_eq!(restored.signature(), sketch.signature());
     assert_eq!(restored.sums(), sketch.sums());
+}
+
+#[test]
+fn ams_round_trip_preserves_counters() {
+    let mut sketch = AmsSketch::with_error_and_seed(0.05, 0.01, 5);
+    for i in 0..1_000_u64 {
+        for _ in 0..(i % 40) {
+            sketch.insert_item(&i);
+        }
+    }
+    let restored: AmsSketch = round_trip(&sketch);
+    assert_eq!(restored.counters(), sketch.counters());
+    assert_eq!(restored.f2(), sketch.f2());
 }
 
 #[test]

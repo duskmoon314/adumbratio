@@ -1,0 +1,322 @@
+//! AMS tug-of-war sketch for the second frequency moment.
+
+use core::convert::Infallible;
+use core::hash::{BuildHasher, Hash};
+
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+
+use crate::error::MergeError;
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::float;
+use crate::hash::{DefaultBuildHasher, hash_one, mix64};
+use crate::traits::{Insert, Merge, Sketch};
+
+/// An AMS tug-of-war sketch for the second frequency moment `F2`: the
+/// self-join size `sum(f_i^2)`, i.e. the squared L2 norm of the frequency
+/// vector.
+///
+/// Every item draws a per-row sign in `{-1, +1}`; each row keeps the sum
+/// `z_j = sum_i sigma_j(i) * f_i`. Squaring kills the cross terms in
+/// expectation, so `z_j^2` is an unbiased estimator of `F2`. Rows are
+/// grouped: the estimate is the median over groups of the within-group
+/// mean of squares — the paper's median-of-means amplification.
+///
+/// ```text
+/// insert("x"): for each row j: z[j] += sign(hash("x"), j)
+///
+/// f2() = median over groups g of mean(z[j]^2 for j in g)
+/// l2_norm() = sqrt(f2())
+/// ```
+///
+/// The sketch is *linear*: merging is an element-wise sum of the row
+/// counters and yields exactly the sketch of the combined stream. It is
+/// also the conceptual parent of Count Sketch — same signed counters, a
+/// different read-out.
+///
+/// # References
+///
+/// - Noga Alon, Yossi Matias, and Mario Szegedy, "The Space Complexity of
+///   Approximating the Frequency Moments", STOC 1996 (journal version:
+///   JCSS 58(1), 1999). <https://doi.org/10.1145/237814.237823>
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AmsSketch<S = DefaultBuildHasher> {
+    counters: Box<[i64]>,
+    groups: usize,
+    width: usize,
+    seed_fingerprint: u64,
+    hasher: S,
+}
+
+impl AmsSketch<DefaultBuildHasher> {
+    /// Creates an AMS sketch with explicit dimensions and seed zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `groups` or `width` is zero.
+    pub fn new(groups: usize, width: usize) -> Self {
+        Self::with_seed(groups, width, 0)
+    }
+
+    /// Creates an AMS sketch with explicit dimensions and hash seed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `groups` or `width` is zero.
+    pub fn with_seed(groups: usize, width: usize, seed: u64) -> Self {
+        let hasher = DefaultBuildHasher::new(seed);
+        Self::from_parts(groups, width, hasher.seed_fingerprint(), hasher)
+    }
+
+    /// Creates an AMS sketch solved from target error parameters.
+    ///
+    /// Uses `width = ceil(16 / epsilon^2)` counters per group and
+    /// `groups = ceil(2 * ln(1 / delta))`, the paper's constants: the
+    /// relative error stays below `epsilon` with probability at least
+    /// `1 - delta`.
+    ///
+    /// Available with the `std` or `libm` feature.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    pub fn with_error(epsilon: f64, delta: f64) -> Self {
+        Self::with_error_and_seed(epsilon, delta, 0)
+    }
+
+    /// Creates a seeded AMS sketch solved from target error parameters.
+    ///
+    /// Available with the `std` or `libm` feature.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    pub fn with_error_and_seed(epsilon: f64, delta: f64, seed: u64) -> Self {
+        assert!(
+            epsilon.is_finite() && epsilon > 0.0 && epsilon < 1.0,
+            "epsilon must be finite and in 0.0..1.0"
+        );
+        assert!(
+            delta.is_finite() && delta > 0.0 && delta < 1.0,
+            "delta must be finite and in 0.0..1.0"
+        );
+        let width = float::ceil(16.0 / (epsilon * epsilon)) as usize;
+        let groups = float::ceil(2.0 * float::ln(1.0 / delta)) as usize;
+        Self::with_seed(groups.max(1), width.max(1), seed)
+    }
+}
+
+impl<S> AmsSketch<S> {
+    /// Creates an AMS sketch from explicit components.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `groups` or `width` is zero.
+    pub fn from_parts(groups: usize, width: usize, seed_fingerprint: u64, hasher: S) -> Self {
+        assert!(groups > 0, "AMS group count must be greater than zero");
+        assert!(width > 0, "AMS width must be greater than zero");
+        Self {
+            counters: vec![0; groups * width].into_boxed_slice(),
+            groups,
+            width,
+            seed_fingerprint,
+            hasher,
+        }
+    }
+
+    /// Returns the number of counter groups.
+    pub const fn groups(&self) -> usize {
+        self.groups
+    }
+
+    /// Returns the number of counters per group.
+    pub const fn width(&self) -> usize {
+        self.width
+    }
+
+    /// Returns the seed fingerprint used by merge compatibility checks.
+    pub const fn seed_fingerprint(&self) -> u64 {
+        self.seed_fingerprint
+    }
+
+    /// Returns the current tug-of-war sums, laid out group-major.
+    pub fn counters(&self) -> &[i64] {
+        &self.counters
+    }
+
+    /// Returns the byte length of the counter storage.
+    pub fn storage_bytes(&self) -> usize {
+        self.counters.len() * size_of::<i64>()
+    }
+
+    /// Clears all counters.
+    pub fn clear(&mut self) {
+        self.counters.fill(0);
+    }
+
+    /// Returns the group means of squared counters, used by [`Self::f2`].
+    fn group_means(&self) -> Vec<f64> {
+        self.counters
+            .chunks_exact(self.width)
+            .map(|group| {
+                group
+                    .iter()
+                    .map(|&z| (z as f64) * (z as f64))
+                    .sum::<f64>()
+                    / self.width as f64
+            })
+            .collect()
+    }
+}
+
+impl<S> AmsSketch<S>
+where
+    S: BuildHasher,
+{
+    /// Inserts one occurrence of `item`, adding its per-row sign.
+    ///
+    /// Signs are derived 64 at a time from the bits of one mixed hash per
+    /// chunk, which is as independent as per-counter mixing for this
+    /// purpose (see the avalanche tests) and 64x cheaper.
+    pub fn insert_item<T>(&mut self, item: &T)
+    where
+        T: Hash + ?Sized,
+    {
+        let hash = hash_one(&self.hasher, item);
+        for (chunk_index, chunk) in self.counters.chunks_mut(64).enumerate() {
+            let mixed = mix64(hash ^ (chunk_index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            for (bit, counter) in chunk.iter_mut().enumerate() {
+                *counter += ((mixed >> bit & 1) as i64) * 2 - 1;
+            }
+        }
+    }
+
+    /// Estimates `F2 = sum(f_i^2)`, the self-join size of the stream.
+    pub fn f2(&self) -> f64 {
+        let mut means = self.group_means();
+        means.sort_by(f64::total_cmp);
+        means[means.len() / 2]
+    }
+
+    /// Estimates the L2 norm `sqrt(sum(f_i^2))` of the frequency vector.
+    ///
+    /// Available with the `std` or `libm` feature.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    pub fn l2_norm(&self) -> f64 {
+        float::sqrt(self.f2())
+    }
+}
+
+impl<S> Sketch for AmsSketch<S> {
+    fn clear(&mut self) {
+        self.clear();
+    }
+
+    fn len_hint(&self) -> Option<u64> {
+        None
+    }
+
+    fn storage_bytes(&self) -> usize {
+        self.storage_bytes()
+    }
+}
+
+impl<T, S> Insert<T> for AmsSketch<S>
+where
+    T: Hash + ?Sized,
+    S: BuildHasher,
+{
+    type Err = Infallible;
+
+    fn insert(&mut self, item: &T) -> Result<(), Self::Err> {
+        self.insert_item(item);
+        Ok(())
+    }
+}
+
+impl<S> Merge for AmsSketch<S> {
+    /// Merges by element-wise sum of the counters: the result is exactly
+    /// the sketch of the combined stream.
+    fn merge_from(&mut self, other: &Self) -> Result<(), MergeError> {
+        if self.groups != other.groups || self.width != other.width {
+            return Err(MergeError::GeometryMismatch);
+        }
+        if self.seed_fingerprint != other.seed_fingerprint {
+            return Err(MergeError::SeedMismatch);
+        }
+        for (left, right) in self.counters.iter_mut().zip(other.counters.iter()) {
+            *left += right;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AmsSketch;
+    use crate::error::MergeError;
+    use crate::traits::{Insert, Merge};
+
+    #[test]
+    fn empty_sketch_estimates_zero() {
+        let sketch = AmsSketch::new(4, 64);
+        assert_eq!(sketch.f2(), 0.0);
+        assert_eq!(sketch.l2_norm(), 0.0);
+    }
+
+    #[test]
+    fn single_item_f2_is_exact() {
+        // One distinct item inserted n times: z_j = +/-n per row, so every
+        // squared counter is n^2 and the estimate is exact.
+        let mut sketch = AmsSketch::new(4, 64);
+        for _ in 0..50 {
+            sketch.insert_item(&"same");
+        }
+        assert_eq!(sketch.f2(), 2_500.0);
+        assert_eq!(sketch.l2_norm(), 50.0);
+    }
+
+    #[test]
+    fn merge_adds_counters_and_validates() {
+        let mut left = AmsSketch::with_seed(3, 32, 5);
+        let mut right = AmsSketch::with_seed(3, 32, 5);
+        left.insert_item(&1_u64);
+        right.insert_item(&2_u64);
+
+        let before: Vec<i64> = left.counters().to_vec();
+        left.merge_from(&right).unwrap();
+        for (after, (a, b)) in left
+            .counters()
+            .iter()
+            .zip(before.iter().zip(right.counters().iter()))
+        {
+            assert_eq!(*after, *a + *b);
+        }
+
+        let other_geometry = AmsSketch::with_seed(4, 32, 5);
+        assert_eq!(
+            left.merge_from(&other_geometry),
+            Err(MergeError::GeometryMismatch)
+        );
+        let other_seed = AmsSketch::with_seed(3, 32, 6);
+        assert_eq!(left.merge_from(&other_seed), Err(MergeError::SeedMismatch));
+    }
+
+    #[test]
+    fn capability_traits_work() {
+        let mut sketch = AmsSketch::new(2, 16);
+        Insert::<str>::insert(&mut sketch, "alice").unwrap();
+        assert!(sketch.f2() >= 1.0);
+    }
+
+    #[test]
+    fn with_error_solves_dimensions() {
+        let sketch = AmsSketch::with_error(0.1, 0.05);
+        assert_eq!(sketch.width(), 1_600);
+        assert!(sketch.groups() >= 6);
+    }
+}
