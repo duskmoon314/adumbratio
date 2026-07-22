@@ -192,6 +192,30 @@ fn hyperloglog_merge_matches_single_sketch_and_commutes() {
 }
 
 #[test]
+fn minhash_merge_matches_single_sketch() {
+    use adumbratio::sketch::MinHash;
+
+    let mut left = MinHash::with_seed(256, 9);
+    let mut right = MinHash::with_seed(256, 9);
+    let mut single = MinHash::with_seed(256, 9);
+
+    for i in 0..10_000_u64 {
+        left.insert_item(&i);
+        single.insert_item(&i);
+    }
+    for i in 10_000..20_000_u64 {
+        right.insert_item(&i);
+        single.insert_item(&i);
+    }
+
+    left.merge_from(&right).unwrap();
+    // Element-wise min is deterministic: the merged signature is identical
+    // to one built over the union.
+    assert_eq!(left.signature(), single.signature());
+    assert_eq!(left.jaccard(&single), 1.0);
+}
+
+#[test]
 fn merge_rejects_incompatible_sketches() {
     let geometry = CountMinGeometry {
         width: 128,

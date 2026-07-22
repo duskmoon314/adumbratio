@@ -272,6 +272,30 @@ fn bench_hyperloglog(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_minhash(c: &mut Criterion) {
+    let mut group = c.benchmark_group("minhash");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let mut sketch = adumbratio::sketch::MinHash::new(256);
+    for item in &present {
+        sketch.insert_item(item);
+    }
+
+    group.bench_function("insert_k256", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            sketch.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    let other = sketch.clone();
+    group.bench_function("jaccard_k256", |b| {
+        b.iter(|| black_box(sketch.jaccard(black_box(&other))));
+    });
+    group.finish();
+}
+
 fn bench_packed_array(c: &mut Criterion) {
     let mut group = c.benchmark_group("packed_array");
     quick(&mut group);
@@ -319,6 +343,7 @@ criterion_group!(
     bench_count_sketch,
     bench_cuckoo,
     bench_hyperloglog,
+    bench_minhash,
     bench_packed_array,
 );
 criterion_main!(benches);

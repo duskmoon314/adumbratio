@@ -261,6 +261,45 @@ fn hyperloglog_estimates_within_standard_errors() {
 }
 
 #[test]
+fn minhash_jaccard_within_standard_error() {
+    use adumbratio::sketch::MinHash;
+
+    // Sets A and B of equal size s with a controlled intersection c, so the
+    // true Jaccard similarity is c / (2s - c). The estimator's standard
+    // error is sqrt(J(1-J)/k); 4 sigma is generous for a seeded suite.
+    let (k, s) = (512_usize, 20_000_u64);
+    for jaccard in [0.1_f64, 0.5, 0.9] {
+        let c = (jaccard * 2.0 * s as f64 / (1.0 + jaccard)) as u64;
+        let mut a = MinHash::with_seed(k, 5);
+        let mut b = MinHash::with_seed(k, 5);
+        for i in 0..c {
+            a.insert_item(&i);
+            b.insert_item(&i);
+        }
+        for i in c..s {
+            a.insert_item(&(1_000_000 + i));
+            b.insert_item(&(2_000_000 + i));
+        }
+
+        let estimate = a.jaccard(&b);
+        let sigma = (jaccard * (1.0 - jaccard) / k as f64).sqrt();
+        assert!(
+            (estimate - jaccard).abs() <= 4.0 * sigma,
+            "J = {jaccard}: estimate {estimate} beyond 4 sigma ({sigma})"
+        );
+    }
+
+    // Disjoint sets estimate exactly zero with overwhelming probability.
+    let mut a = MinHash::new(256);
+    let mut b = MinHash::new(256);
+    for i in 0..1_000_u64 {
+        a.insert_item(&i);
+        b.insert_item(&(1_000_000 + i));
+    }
+    assert_eq!(a.jaccard(&b), 0.0);
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

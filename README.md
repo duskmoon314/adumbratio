@@ -49,12 +49,12 @@ blocks when a workload needs a custom composition.
 | Cuckoo filter | membership + deletion, high load factor | `BucketArray<F>` + `PartialKeyCuckoo` + `KickLoop` | ✅ 3 |
 | Blocked Bloom filter | membership, cache-friendly | `BitArray` + `Blocked` scheme | ✅ 4 |
 | HyperLogLog | cardinality (1.04/√m error) | `PackedArray<6>` registers + max update | ✅ 5 |
+| MinHash | set similarity (1/√k error) | k hash-derivation minima + element-wise min merge | ✅ 5 |
 
 ## Planned sketches
 
 | Sketch | Answers | Built from | Stage |
 |---|---|---|---|
-| MinHash | set similarity | minima of k hash derivations | 5 |
 | top-k companion | heavy hitters | `CountMinSketch` + candidate heap | 5 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),

@@ -6,7 +6,7 @@
 
 use adumbratio::sketch::{
     BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter, HyperLogLog,
+    CuckooFilter, HyperLogLog, MinHash,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -102,6 +102,16 @@ fn hyperloglog_round_trip_preserves_estimate() {
     let restored: HyperLogLog = round_trip(&sketch);
     assert_eq!(restored.cardinality(), sketch.cardinality());
     assert_eq!(restored.precision(), sketch.precision());
+}
+
+#[test]
+fn minhash_round_trip_preserves_signature() {
+    let mut sketch = MinHash::with_seed(256, 3);
+    for i in 0..10_000_u64 {
+        sketch.insert_item(&i);
+    }
+    let restored: MinHash = round_trip(&sketch);
+    assert_eq!(restored.signature(), sketch.signature());
 }
 
 #[test]
