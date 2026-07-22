@@ -1,6 +1,7 @@
 //! Composed sketches.
 
 mod ams;
+mod binary_fuse;
 mod blocked_bloom;
 mod bloom;
 mod count_min;
@@ -18,6 +19,7 @@ mod top_k;
 mod xor_filter;
 
 pub use ams::AmsSketch;
+pub use binary_fuse::BinaryFuseFilter;
 pub use blocked_bloom::BlockedBloomFilter;
 pub use bloom::{BloomFilter, BloomGeometry};
 pub use count_min::{CountMinGeometry, CountMinSketch};

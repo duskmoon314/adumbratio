@@ -414,6 +414,36 @@ fn bench_quotient_filter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_binary_fuse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("binary_fuse");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let absent = items(100_000, 2);
+    let filter = adumbratio::sketch::BinaryFuseFilter::build(&present);
+
+    group.bench_function("build_100k", |b| {
+        b.iter(|| black_box(adumbratio::sketch::BinaryFuseFilter::build(black_box(&present))));
+    });
+    group.bench_function("query_hit", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&present[i % present.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.bench_function("query_miss", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&absent[i % absent.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.finish();
+}
+
 fn bench_ams(c: &mut Criterion) {
     let mut group = c.benchmark_group("ams");
     quick(&mut group);
@@ -561,6 +591,7 @@ fn bench_packed_array(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_ams,
+    bench_binary_fuse,
     bench_bloom,
     bench_blocked_bloom,
     bench_counting_bloom,

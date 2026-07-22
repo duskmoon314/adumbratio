@@ -684,6 +684,33 @@ fn misra_gries_and_space_saving_honor_deterministic_bounds() {
 }
 
 #[test]
+fn binary_fuse_fpp_matches_slot_width() {
+    use adumbratio::sketch::BinaryFuseFilter;
+
+    let n = 100_000_u64;
+    let items: Vec<u64> = (0..n).collect();
+    let filter = BinaryFuseFilter::build(&items);
+    for item in &items {
+        assert!(filter.contains_item(item), "missing built item {item}");
+    }
+
+    let bound = filter.expected_fpp();
+    let fpp = false_positive_rate(n, 200_000, |i| filter.contains_item(&i));
+    assert!(
+        fpp <= 1.5 * bound + 1e-5,
+        "empirical FPP {fpp} exceeds bound {bound}"
+    );
+
+    let narrow = BinaryFuseFilter::<u8>::build_with_seed(&items, 0);
+    let fpp = false_positive_rate(n, 200_000, |i| narrow.contains_item(&i));
+    assert!(
+        fpp <= 1.5 * narrow.expected_fpp() + 1e-4,
+        "u8 empirical FPP {fpp} exceeds bound {}",
+        narrow.expected_fpp()
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

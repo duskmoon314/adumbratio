@@ -5,9 +5,9 @@
 #![cfg(feature = "serde")]
 
 use adumbratio::sketch::{
-    AmsSketch, BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch,
-    CountingBloomFilter, CuckooFilter, HyperLogLog, KllSketch, MinHash, MisraGries,
-    QuotientFilter, SimHash, SpaceSaving, ThetaSketch, TopK, XorFilter,
+    AmsSketch, BinaryFuseFilter, BlockedBloomFilter, BloomFilter, CountMinSketch,
+    CountSketch, CountingBloomFilter, CuckooFilter, HyperLogLog, KllSketch, MinHash,
+    MisraGries, QuotientFilter, SimHash, SpaceSaving, ThetaSketch, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -217,6 +217,18 @@ fn frequent_summaries_round_trip() {
     assert_eq!(ss_restored.top_k(), ss.top_k());
     assert_eq!(mg_restored.total_count(), mg.total_count());
     assert_eq!(ss_restored.total_count(), ss.total_count());
+}
+
+#[test]
+fn binary_fuse_round_trip_preserves_answers() {
+    let items: Vec<u64> = (0..20_000).collect();
+    let filter = BinaryFuseFilter::build_with_seed(&items, 7);
+    let restored: BinaryFuseFilter = round_trip(&filter);
+    assert_eq!(restored.len(), filter.len());
+    assert_eq!(restored.table_len(), filter.table_len());
+    for i in (0..40_000_u64).step_by(3) {
+        assert_eq!(restored.contains_item(&i), filter.contains_item(&i));
+    }
 }
 
 #[test]

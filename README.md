@@ -59,12 +59,13 @@ blocks when a workload needs a custom composition.
 | AMS sketch | L2 norm / self-join size | tug-of-war signed counters + median-of-means | ✅ 7 |
 | Misra–Gries | deterministic heavy hitters (lower bounds) | k counters + decrement-all | ✅ 7 |
 | Space-Saving | deterministic heavy hitters (upper bounds) | k entries + replace-the-minimum | ✅ 7 |
+| binary fuse filter | static membership, ~1.125·f bits/item | fuse-schedule xor table + hypergraph peeling | ✅ 8 |
 
 ## Planned sketches
 
 | Sketch | Answers | Stage |
 |---|---|---|
-| binary fuse / ribbon, b-bit MinHash, DDSketch, IBLT, … | further family breadth | 8 |
+| b-bit MinHash / HyperMinHash, DDSketch / t-digest, IBLT, … | similarity+joint, quantiles, set reconciliation | 8 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),
 and the integration tests in `tests/` validate the paper's guarantees
