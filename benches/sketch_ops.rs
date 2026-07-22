@@ -319,6 +319,29 @@ fn bench_top_k(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_kll(c: &mut Criterion) {
+    let mut group = c.benchmark_group("kll");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let mut sketch = adumbratio::sketch::KllSketch::with_seed(200, 1);
+    for item in &present {
+        sketch.insert_item(item);
+    }
+
+    group.bench_function("insert_k200", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            sketch.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("quantile", |b| {
+        b.iter(|| black_box(sketch.quantile(black_box(0.95))));
+    });
+    group.finish();
+}
+
 fn bench_packed_array(c: &mut Criterion) {
     let mut group = c.benchmark_group("packed_array");
     quick(&mut group);
@@ -366,6 +389,7 @@ criterion_group!(
     bench_count_sketch,
     bench_cuckoo,
     bench_hyperloglog,
+    bench_kll,
     bench_minhash,
     bench_top_k,
     bench_packed_array,

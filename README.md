@@ -51,12 +51,16 @@ blocks when a workload needs a custom composition.
 | HyperLogLog | cardinality (1.04/√m error) | `PackedArray<6>` registers + max update | ✅ 5 |
 | MinHash | set similarity (1/√k error) | k hash-derivation minima + element-wise min merge | ✅ 5 |
 | TopK | heavy hitters | `CountMinSketch` + candidate set | ✅ 5 |
+| KLL | quantiles / rank (~1/k error) | compactor hierarchy (levels of sorted buffers) | ✅ 6 |
 
 ## Planned sketches
 
-Nothing else on the current roadmap — see
-[DESIGN.md](DESIGN.md#11-roadmap) for what comes next (benchmarks against
-existing crates, 0.1 release).
+| Sketch | Answers | Stage |
+|---|---|---|
+| xor filter | static membership, ~1.23·log2(1/ε) bits/item | 6 |
+| quotient filter | membership + deletion, mergeable, cache-linear | 6 |
+| theta sketch, SimHash, AMS, Misra–Gries, Space-Saving | set ops, cosine similarity, L2 norm, deterministic heavy hitters | 7 |
+| binary fuse / ribbon, b-bit MinHash, DDSketch, IBLT, … | further family breadth | 8 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),
 and the integration tests in `tests/` validate the paper's guarantees

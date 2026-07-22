@@ -28,6 +28,9 @@ fn hash(item: u64) -> u64 {
 /// Returns the 64x64 flip-probability matrix: entry [b][j] is the observed
 /// probability that output bit j flips when input bit b is flipped. Each
 /// input bit gets an independent base sample, decorrelating the cells.
+// Bit positions are semantically meaningful here, so range loops over
+// `enumerate` are the clearer form.
+#[allow(clippy::needless_range_loop)]
 fn avalanche_matrix() -> [[f64; 64]; 64] {
     let mut matrix = [[0.0_f64; 64]; 64];
     for b in 0..64 {
@@ -66,6 +69,8 @@ fn hash_has_full_avalanche() {
 }
 
 #[test]
+// Bit positions are semantically meaningful in this loop.
+#[allow(clippy::needless_range_loop)]
 fn hash_uniform_on_sequential_inputs() {
     // Sequential IDs are the canonical sketch input; per-bit means must stay
     // near 0.5. sigma for 100k samples is ~0.0016; 0.01 is a 6-sigma bound.

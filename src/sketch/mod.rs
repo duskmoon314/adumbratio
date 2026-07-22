@@ -7,6 +7,7 @@ mod count_sketch;
 mod counting_bloom;
 mod cuckoo;
 mod hyperloglog;
+mod kll;
 mod minhash;
 mod top_k;
 
@@ -17,5 +18,6 @@ pub use count_sketch::{CountSketch, CountSketchGeometry};
 pub use counting_bloom::CountingBloomFilter;
 pub use cuckoo::{CuckooFilter, CuckooGeometry};
 pub use hyperloglog::HyperLogLog;
+pub use kll::KllSketch;
 pub use minhash::MinHash;
 pub use top_k::TopK;

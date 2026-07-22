@@ -6,7 +6,7 @@
 
 use adumbratio::sketch::{
     BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter, HyperLogLog, MinHash, TopK,
+    CuckooFilter, HyperLogLog, KllSketch, MinHash, TopK,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -125,6 +125,19 @@ fn top_k_round_trip_preserves_candidates() {
     let restored: TopK<u64> = round_trip(&top);
     assert_eq!(restored.top_k(), top.top_k());
     assert_eq!(restored.total_count(), top.total_count());
+}
+
+#[test]
+fn kll_round_trip_preserves_quantiles() {
+    let mut sketch = KllSketch::<u64>::with_seed(100, 3);
+    for i in 0..50_000_u64 {
+        sketch.insert_item(&(i * 7919 % 50_000));
+    }
+    let restored: KllSketch<u64> = round_trip(&sketch);
+    assert_eq!(restored.count(), sketch.count());
+    for q in [0.1, 0.5, 0.9] {
+        assert_eq!(restored.quantile(q), sketch.quantile(q));
+    }
 }
 
 #[test]

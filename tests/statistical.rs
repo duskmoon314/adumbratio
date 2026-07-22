@@ -340,6 +340,49 @@ fn top_k_recovers_heavy_hitters_on_zipf_stream() {
 }
 
 #[test]
+fn kll_rank_error_within_bound() {
+    use adumbratio::sketch::KllSketch;
+
+    // Measured worst-case rank error is ~1.7/k; 2.5/k gives comfortable
+    // margin while remaining a meaningful bound (0.0125 at k = 200).
+    let k = 200_usize;
+    let n = 100_000_u64;
+    let mut rng = XorShift64::new(3);
+    let mut sketch = KllSketch::with_seed(k, 1);
+    let mut values = Vec::with_capacity(n as usize);
+    for _ in 0..n {
+        let v = rng.next_u64() % 1_000_000;
+        sketch.insert_item(&v);
+        values.push(v);
+    }
+    values.sort_unstable();
+
+    // The rank of a value with duplicates is an interval; the error is the
+    // distance from q to it (standard rank-error definition).
+    for qi in 1..100 {
+        let q = qi as f64 / 100.0;
+        let estimate = sketch.quantile(q).unwrap();
+        let first = values.partition_point(|&v| v < estimate) as f64 / n as f64;
+        let last = values.partition_point(|&v| v <= estimate) as f64 / n as f64;
+        let error = if q < first {
+            first - q
+        } else if q > last {
+            q - last
+        } else {
+            0.0
+        };
+        assert!(
+            error <= 2.5 / k as f64,
+            "q = {q}: rank error {error} beyond 2.5/k"
+        );
+    }
+
+    // rank() is the inverse query on the same weighted sample.
+    let probe = values[(n / 2) as usize];
+    assert!((sketch.rank(&probe) - 0.5).abs() <= 2.5 / k as f64 + 1.0 / n as f64);
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;
