@@ -711,6 +711,42 @@ fn binary_fuse_fpp_matches_slot_width() {
 }
 
 #[test]
+fn bbit_minhash_jaccard_within_tolerance() {
+    use adumbratio::sketch::BBitMinHash;
+
+    // Same construction as the full MinHash test; b-bit trades a little
+    // variance for 8x smaller signatures, so tolerances are wider.
+    let (k, s) = (512_usize, 20_000_u64);
+    for jaccard in [0.1_f64, 0.5, 0.9] {
+        let c = (jaccard * 2.0 * s as f64 / (1.0 + jaccard)) as u64;
+        let mut estimates = Vec::new();
+        for seed in 1..=3_u64 {
+            let mut a = BBitMinHash::with_seed(k, seed);
+            let mut b = BBitMinHash::with_seed(k, seed);
+            for i in 0..c {
+                a.insert_item(&i);
+                b.insert_item(&i);
+            }
+            for i in c..s {
+                a.insert_item(&(1_000_000 + i));
+                b.insert_item(&(2_000_000 + i));
+            }
+            let estimate = a.jaccard(&b);
+            assert!(
+                (estimate - jaccard).abs() <= 0.15,
+                "J = {jaccard}: b-bit estimate {estimate} beyond tolerance"
+            );
+            estimates.push(estimate);
+        }
+        let mean: f64 = estimates.iter().sum::<f64>() / estimates.len() as f64;
+        assert!(
+            (mean - jaccard).abs() <= 0.05,
+            "J = {jaccard}: mean {mean} off by more than 0.05"
+        );
+    }
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

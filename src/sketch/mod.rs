@@ -1,6 +1,7 @@
 //! Composed sketches.
 
 mod ams;
+mod bbit_minhash;
 mod binary_fuse;
 mod blocked_bloom;
 mod bloom;
@@ -19,6 +20,7 @@ mod top_k;
 mod xor_filter;
 
 pub use ams::AmsSketch;
+pub use bbit_minhash::BBitMinHash;
 pub use binary_fuse::BinaryFuseFilter;
 pub use blocked_bloom::BlockedBloomFilter;
 pub use bloom::{BloomFilter, BloomGeometry};

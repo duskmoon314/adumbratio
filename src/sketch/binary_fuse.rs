@@ -3,6 +3,7 @@
 use core::hash::{BuildHasher, Hash};
 
 use alloc::boxed::Box;
+#[cfg(any(feature = "std", feature = "libm"))]
 use alloc::vec::Vec;
 
 use crate::block::Fingerprint;
@@ -62,12 +63,14 @@ pub struct BinaryFuseFilter<F: Fingerprint = u16, S = DefaultBuildHasher> {
 /// Construction parameters ported from the reference implementation. The
 /// formulas are empirical and marked sensitive there, so they are kept
 /// bit-faithful (including the floor before the shift).
+#[cfg(any(feature = "std", feature = "libm"))]
 struct Parameters {
     segment_length: usize,
     segment_count: usize,
     fingerprints_len: usize,
 }
 
+#[cfg(any(feature = "std", feature = "libm"))]
 impl Parameters {
     #[cfg(any(feature = "std", feature = "libm"))]
     fn compute(size: usize) -> Self {
@@ -234,6 +237,7 @@ where
 
 /// Hashes every item once and drops duplicate hashes, so construction sees
 /// a distinct key set.
+#[cfg(any(feature = "std", feature = "libm"))]
 fn distinct_hashes<S: BuildHasher, T: Hash>(hasher: &S, items: &[T]) -> Vec<u64> {
     let mut hashes: Vec<u64> = items
         .iter()
@@ -244,6 +248,7 @@ fn distinct_hashes<S: BuildHasher, T: Hash>(hasher: &S, items: &[T]) -> Vec<u64>
     hashes
 }
 
+#[cfg(any(feature = "std", feature = "libm"))]
 struct BuiltTable<F> {
     fingerprints: Box<[F]>,
     parameters: Parameters,
@@ -251,6 +256,7 @@ struct BuiltTable<F> {
 }
 
 /// Positions under an alternate parameter set (used for peeling retries).
+#[cfg(any(feature = "std", feature = "libm"))]
 fn positions_with(hash: u64, parameters: &Parameters, layout_seed: u64) -> (usize, usize, usize) {
     let segment_count_length = parameters.segment_count * parameters.segment_length;
     let mask = parameters.segment_length - 1;

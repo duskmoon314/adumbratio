@@ -414,6 +414,30 @@ fn bench_quotient_filter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_bbit_minhash(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bbit_minhash");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let mut sketch = adumbratio::sketch::BBitMinHash::new(256);
+    for item in &present {
+        sketch.insert_item(item);
+    }
+    let other = sketch.clone();
+
+    group.bench_function("insert_k256", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            sketch.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("jaccard_k256", |b| {
+        b.iter(|| black_box(sketch.jaccard(black_box(&other))));
+    });
+    group.finish();
+}
+
 fn bench_binary_fuse(c: &mut Criterion) {
     let mut group = c.benchmark_group("binary_fuse");
     quick(&mut group);
@@ -591,6 +615,7 @@ fn bench_packed_array(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_ams,
+    bench_bbit_minhash,
     bench_binary_fuse,
     bench_bloom,
     bench_blocked_bloom,
