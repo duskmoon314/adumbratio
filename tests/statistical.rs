@@ -383,6 +383,35 @@ fn kll_rank_error_within_bound() {
 }
 
 #[test]
+fn xor_filter_fpp_matches_slot_width() {
+    use adumbratio::sketch::XorFilter;
+
+    let n = 100_000_u64;
+    let items: Vec<u64> = (0..n).collect();
+    let filter = XorFilter::build(&items);
+    for item in &items {
+        assert!(filter.contains_item(item), "missing built item {item}");
+    }
+
+    // FPP = 2^-16 for u16 slots; measure over disjoint queries.
+    let bound = filter.expected_fpp();
+    let fpp = false_positive_rate(n, 200_000, |i| filter.contains_item(&i));
+    assert!(
+        fpp <= 1.5 * bound + 1e-5,
+        "empirical FPP {fpp} exceeds bound {bound}"
+    );
+
+    // u8 slots: FPP = 2^-8.
+    let narrow = XorFilter::<u8>::build_with_seed(&items, 0);
+    let fpp = false_positive_rate(n, 200_000, |i| narrow.contains_item(&i));
+    assert!(
+        fpp <= 1.5 * narrow.expected_fpp() + 1e-4,
+        "u8 empirical FPP {fpp} exceeds bound {}",
+        narrow.expected_fpp()
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

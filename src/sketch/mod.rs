@@ -10,6 +10,7 @@ mod hyperloglog;
 mod kll;
 mod minhash;
 mod top_k;
+mod xor_filter;
 
 pub use blocked_bloom::BlockedBloomFilter;
 pub use bloom::{BloomFilter, BloomGeometry};
@@ -21,3 +22,4 @@ pub use hyperloglog::HyperLogLog;
 pub use kll::KllSketch;
 pub use minhash::MinHash;
 pub use top_k::TopK;
+pub use xor_filter::XorFilter;

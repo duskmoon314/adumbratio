@@ -6,7 +6,7 @@
 
 use adumbratio::sketch::{
     BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter, HyperLogLog, KllSketch, MinHash, TopK,
+    CuckooFilter, HyperLogLog, KllSketch, MinHash, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -137,6 +137,18 @@ fn kll_round_trip_preserves_quantiles() {
     assert_eq!(restored.count(), sketch.count());
     for q in [0.1, 0.5, 0.9] {
         assert_eq!(restored.quantile(q), sketch.quantile(q));
+    }
+}
+
+#[test]
+fn xor_filter_round_trip_preserves_answers() {
+    let items: Vec<u64> = (0..20_000).collect();
+    let filter = XorFilter::build_with_seed(&items, 7);
+    let restored: XorFilter = round_trip(&filter);
+    assert_eq!(restored.len(), filter.len());
+    assert_eq!(restored.table_len(), filter.table_len());
+    for i in (0..40_000_u64).step_by(3) {
+        assert_eq!(restored.contains_item(&i), filter.contains_item(&i));
     }
 }
 

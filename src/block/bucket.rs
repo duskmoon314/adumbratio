@@ -17,6 +17,11 @@ pub trait Fingerprint: Copy + Debug + Eq {
     /// Builds a fingerprint from a non-zero integer.
     fn from_nonzero_u64(value: u64) -> Self;
 
+    /// Builds a fingerprint from an integer, truncating excess bits. Unlike
+    /// [`Fingerprint::from_hash`], zero is preserved — for structures like
+    /// xor-filter tables where slots have no vacancy marker.
+    fn from_u64(value: u64) -> Self;
+
     /// Converts the fingerprint to an integer.
     fn to_u64(self) -> u64;
 
@@ -48,6 +53,10 @@ macro_rules! impl_fingerprint {
 
             fn from_nonzero_u64(value: u64) -> Self {
                 debug_assert_ne!(value, 0);
+                value as Self
+            }
+
+            fn from_u64(value: u64) -> Self {
                 value as Self
             }
 

@@ -342,6 +342,36 @@ fn bench_kll(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_xor_filter(c: &mut Criterion) {
+    let mut group = c.benchmark_group("xor_filter");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let absent = items(100_000, 2);
+    let filter = adumbratio::sketch::XorFilter::build(&present);
+
+    group.bench_function("build_100k", |b| {
+        b.iter(|| black_box(adumbratio::sketch::XorFilter::build(black_box(&present))));
+    });
+    group.bench_function("query_hit", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&present[i % present.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.bench_function("query_miss", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&absent[i % absent.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.finish();
+}
+
 fn bench_packed_array(c: &mut Criterion) {
     let mut group = c.benchmark_group("packed_array");
     quick(&mut group);
@@ -392,6 +422,7 @@ criterion_group!(
     bench_kll,
     bench_minhash,
     bench_top_k,
+    bench_xor_filter,
     bench_packed_array,
 );
 criterion_main!(benches);
