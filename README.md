@@ -48,13 +48,14 @@ blocks when a workload needs a custom composition.
 | Count Sketch | frequency (unbiased) | `Matrix<PackedArray<64>>` + signed median read | ✅ 3 |
 | Cuckoo filter | membership + deletion, high load factor | `BucketArray<F>` + `PartialKeyCuckoo` + `KickLoop` | ✅ 3 |
 | Blocked Bloom filter | membership, cache-friendly | `BitArray` + `Blocked` scheme | ✅ 4 |
+| HyperLogLog | cardinality (1.04/√m error) | `PackedArray<6>` registers + max update | ✅ 5 |
 
 ## Planned sketches
 
 | Sketch | Answers | Built from | Stage |
 |---|---|---|---|
-| HyperLogLog | cardinality | `PackedArray<6>` registers + max update | 5 |
-| MinHash, top-k | similarity, heavy hitters | … | 5 |
+| MinHash | set similarity | minima of k hash derivations | 5 |
+| top-k companion | heavy hitters | `CountMinSketch` + candidate heap | 5 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),
 and the integration tests in `tests/` validate the paper's guarantees

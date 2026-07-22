@@ -24,6 +24,7 @@ macro_rules! unary_shim {
 
 unary_shim!(ln, ln, log);
 unary_shim!(exp, exp, exp);
+unary_shim!(sqrt, sqrt, sqrt);
 unary_shim!(ceil, ceil, ceil);
 unary_shim!(round, round, round);
 

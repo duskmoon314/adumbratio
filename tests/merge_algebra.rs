@@ -165,6 +165,33 @@ fn blocked_bloom_merge_matches_single_filter() {
 }
 
 #[test]
+fn hyperloglog_merge_matches_single_sketch_and_commutes() {
+    use adumbratio::sketch::HyperLogLog;
+
+    let mut left = HyperLogLog::with_seed(12, 9);
+    let mut right = HyperLogLog::with_seed(12, 9);
+    let mut single = HyperLogLog::with_seed(12, 9);
+
+    for i in 0..50_000_u64 {
+        left.insert_item(&i);
+        single.insert_item(&i);
+    }
+    for i in 50_000..100_000_u64 {
+        right.insert_item(&i);
+        single.insert_item(&i);
+    }
+
+    let mut forward = left.clone();
+    forward.merge_from(&right).unwrap();
+    let mut backward = right.clone();
+    backward.merge_from(&left).unwrap();
+
+    // Register-wise max is deterministic, so merged estimates are identical.
+    assert_eq!(forward.cardinality(), single.cardinality());
+    assert_eq!(forward.cardinality(), backward.cardinality());
+}
+
+#[test]
 fn merge_rejects_incompatible_sketches() {
     let geometry = CountMinGeometry {
         width: 128,

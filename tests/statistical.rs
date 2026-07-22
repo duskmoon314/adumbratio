@@ -228,6 +228,39 @@ fn cuckoo_key(geometry: &CuckooGeometry, seed: u64, item: u64) -> (u64, usize) {
 }
 
 #[test]
+fn hyperloglog_estimates_within_standard_errors() {
+    use adumbratio::sketch::HyperLogLog;
+
+    // b = 12 -> m = 4096 registers, theoretical standard error ~1.6%.
+    for n in [100_u64, 10_000, 1_000_000] {
+        let mut sketch = HyperLogLog::with_seed(12, 5);
+        for i in 0..n {
+            sketch.insert_item(&i);
+        }
+        let estimate = sketch.cardinality();
+        let sigma = sketch.standard_error();
+        let relative_error = (estimate - n as f64).abs() / n as f64;
+        assert!(
+            relative_error <= 4.0 * sigma,
+            "n = {n}: estimate {estimate} off by {:.2}% ({} sigma allowed)",
+            relative_error * 100.0,
+            4.0
+        );
+    }
+
+    // Duplicate-heavy streams must not inflate the estimate.
+    let mut sketch = HyperLogLog::with_seed(14, 5);
+    for i in 0..10_000_u64 {
+        for _ in 0..10 {
+            sketch.insert_item(&i);
+        }
+    }
+    let estimate = sketch.cardinality();
+    let relative_error = (estimate - 10_000.0).abs() / 10_000.0;
+    assert!(relative_error <= 4.0 * sketch.standard_error());
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;
