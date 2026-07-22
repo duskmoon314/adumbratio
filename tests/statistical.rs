@@ -411,6 +411,112 @@ fn xor_filter_fpp_matches_slot_width() {
     );
 }
 
+/// Recomputes an item's quotient-filter placement through the public
+/// hashing API: two items with the same `(quotient, remainder)` pair are
+/// indistinguishable to the filter ("twins"), exactly like cuckoo
+/// fingerprints. Tests must reason about pairs, not items.
+fn quotient_pair(seed: u64, quotient_bits: u32, r_bits: u32, item: u64) -> (u64, u64) {
+    let hash = hash_one(&DefaultBuildHasher::new(seed), &item);
+    let quotient = (hash >> (64 - quotient_bits)) & ((1 << quotient_bits) - 1);
+    let remainder = (hash >> (64 - quotient_bits - r_bits)) & ((1 << r_bits) - 1);
+    (quotient, remainder)
+}
+
+#[test]
+fn quotient_filter_matches_reference_model_under_churn() {
+    use adumbratio::sketch::{QuotientFilter, QuotientGeometry};
+
+    // Heavy insert/remove churn on a small table (long clusters, table
+    // wrap), verified against a pair-level exact model at every step.
+    let (seed, quotient_bits, r_bits) = (1, 6, 10);
+    let mut filter =
+        QuotientFilter::<10>::from_geometry(QuotientGeometry { quotient_bits }, seed);
+    let mut rng = XorShift64::new(99);
+    // pair -> (items sharing it, still stored in the filter)
+    let mut model: std::collections::HashMap<(u64, u64), (Vec<u64>, bool)> =
+        std::collections::HashMap::new();
+    let mut counter = 0_u64;
+    for round in 0..3_000 {
+        if model.is_empty() || rng.next_index(100) < 60 {
+            let item = counter;
+            counter += 1;
+            let pair = quotient_pair(seed, quotient_bits, r_bits, item);
+            // The table may legitimately fill on a 64-slot table; only
+            // track items the filter actually accepted.
+            if filter.insert_item(&item).is_ok() {
+                let entry = model.entry(pair).or_insert_with(|| (Vec::new(), true));
+                entry.0.push(item);
+                entry.1 = true; // the pair is stored (again) after every insert
+            }
+        } else {
+            let victim = rng.next_index(counter as usize) as u64;
+            let pair = quotient_pair(seed, quotient_bits, r_bits, victim);
+            if let Some((items, stored)) = model.get_mut(&pair)
+                && items.contains(&victim)
+            {
+                assert_eq!(
+                    filter.remove_item(&victim),
+                    *stored,
+                    "remove({victim}) disagrees with the pair model at round {round}"
+                );
+                *stored = false;
+            }
+        }
+        if round % 250 == 0 {
+            let stored_pairs = model.values().filter(|(_, stored)| *stored).count();
+            assert_eq!(filter.len(), stored_pairs);
+            for (pair, (items, stored)) in &model {
+                if !stored {
+                    continue;
+                }
+                for item in items {
+                    assert!(
+                        filter.contains_item(item),
+                        "false negative for {item} at round {round}"
+                    );
+                }
+                let _ = pair;
+            }
+        }
+    }
+}
+
+#[test]
+fn quotient_filter_high_load_fpp_and_wrap() {
+    use adumbratio::sketch::QuotientFilter;
+
+    // 90% load forces wrapping clusters. Removal guarantees hold per
+    // fingerprint pair, so remove only twin-group leaders.
+    let (seed, n) = (0, 9_000_u64);
+    let mut filter = QuotientFilter::with_capacity_and_seed(10_000, 0.001, seed);
+    let quotient_bits = filter.geometry().quotient_bits;
+
+    let mut seen = std::collections::HashSet::new();
+    let leaders: Vec<u64> = (0..n)
+        .filter(|&i| seen.insert(quotient_pair(seed, quotient_bits, 10, i)))
+        .collect();
+
+    for &i in &leaders {
+        filter.insert_item(&i).unwrap();
+    }
+    for &i in &leaders {
+        assert!(filter.contains_item(&i), "missing {i}");
+    }
+    for &i in leaders.iter().step_by(2) {
+        assert!(filter.remove_item(&i), "stored leader {i} was not removable");
+    }
+    for &i in leaders.iter().skip(1).step_by(2) {
+        assert!(filter.contains_item(&i), "missing {i} after deletions");
+    }
+
+    let bound = filter.expected_fpp();
+    let fpp = false_positive_rate(n, 100_000, |i| filter.contains_item(&i));
+    assert!(
+        fpp <= 2.0 * bound + 0.0005,
+        "empirical FPP {fpp} exceeds bound {bound}"
+    );
+}
+
 #[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;

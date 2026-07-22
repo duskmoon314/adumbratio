@@ -372,6 +372,48 @@ fn bench_xor_filter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_quotient_filter(c: &mut Criterion) {
+    let mut group = c.benchmark_group("quotient_filter");
+    quick(&mut group);
+
+    let present = items(50_000, 1);
+    let absent = items(50_000, 2);
+    let mut filter = adumbratio::sketch::QuotientFilter::with_capacity(50_000, 0.001);
+    for item in &present[..25_000] {
+        filter.insert_item(item).unwrap();
+    }
+
+    group.bench_function("insert_load50", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let item = &absent[i % absent.len()];
+            let _ = filter.insert_item(black_box(item));
+            let _ = filter.remove_item(black_box(item));
+            i += 1;
+        });
+    });
+    for item in &present[25_000..] {
+        filter.insert_item(item).unwrap();
+    }
+    group.bench_function("query_hit_load75", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&present[i % present.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.bench_function("query_miss_load75", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&absent[i % absent.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.finish();
+}
+
 fn bench_packed_array(c: &mut Criterion) {
     let mut group = c.benchmark_group("packed_array");
     quick(&mut group);
@@ -421,6 +463,7 @@ criterion_group!(
     bench_hyperloglog,
     bench_kll,
     bench_minhash,
+    bench_quotient_filter,
     bench_top_k,
     bench_xor_filter,
     bench_packed_array,

@@ -52,13 +52,13 @@ blocks when a workload needs a custom composition.
 | MinHash | set similarity (1/√k error) | k hash-derivation minima + element-wise min merge | ✅ 5 |
 | TopK | heavy hitters | `CountMinSketch` + candidate set | ✅ 5 |
 | KLL | quantiles / rank (~1/k error) | compactor hierarchy (levels of sorted buffers) | ✅ 6 |
+| xor filter | static membership, ~1.23·log2(1/ε) bits/item | 3-segment xor table + hypergraph peeling | ✅ 6 |
+| quotient filter | membership + deletion + merge, cache-linear | `PackedArray<R>` remainders + 3 `BitArray` metadata rows | ✅ 6 |
 
 ## Planned sketches
 
 | Sketch | Answers | Stage |
 |---|---|---|
-| xor filter | static membership, ~1.23·log2(1/ε) bits/item | 6 |
-| quotient filter | membership + deletion, mergeable, cache-linear | 6 |
 | theta sketch, SimHash, AMS, Misra–Gries, Space-Saving | set ops, cosine similarity, L2 norm, deterministic heavy hitters | 7 |
 | binary fuse / ribbon, b-bit MinHash, DDSketch, IBLT, … | further family breadth | 8 |
 

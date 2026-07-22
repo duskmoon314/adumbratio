@@ -60,6 +60,21 @@ impl BitArray {
         previous
     }
 
+    /// Clears the bit at index `i`, returning its previous value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i >= self.len()`.
+    pub fn unset(&mut self, i: usize) -> bool {
+        self.check_index(i);
+        let word = i / u64::BITS as usize;
+        let bit = i % u64::BITS as usize;
+        let mask = 1_u64 << bit;
+        let previous = (self.words[word] & mask) != 0;
+        self.words[word] &= !mask;
+        previous
+    }
+
     /// Counts the set bits in the array.
     pub fn count_ones(&self) -> usize {
         self.words

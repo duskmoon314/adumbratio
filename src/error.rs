@@ -10,6 +10,9 @@ pub enum MergeError {
     GeometryMismatch,
     /// The sketches were built with different hash seeds.
     SeedMismatch,
+    /// Merging succeeded in principle, but the destination lacks the
+    /// capacity to hold the union (e.g. a quotient filter filling up).
+    InsufficientCapacity,
 }
 
 impl fmt::Display for MergeError {
@@ -17,6 +20,9 @@ impl fmt::Display for MergeError {
         match self {
             Self::GeometryMismatch => f.write_str("sketch geometry does not match"),
             Self::SeedMismatch => f.write_str("sketch seed does not match"),
+            Self::InsufficientCapacity => {
+                f.write_str("insufficient capacity to hold the merged union")
+            }
         }
     }
 }

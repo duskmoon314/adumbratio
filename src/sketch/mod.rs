@@ -9,6 +9,7 @@ mod cuckoo;
 mod hyperloglog;
 mod kll;
 mod minhash;
+mod quotient;
 mod top_k;
 mod xor_filter;
 
@@ -21,5 +22,6 @@ pub use cuckoo::{CuckooFilter, CuckooGeometry};
 pub use hyperloglog::HyperLogLog;
 pub use kll::KllSketch;
 pub use minhash::MinHash;
+pub use quotient::{QuotientFilter, QuotientGeometry};
 pub use top_k::TopK;
 pub use xor_filter::XorFilter;

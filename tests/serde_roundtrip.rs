@@ -6,7 +6,7 @@
 
 use adumbratio::sketch::{
     BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter, HyperLogLog, KllSketch, MinHash, TopK, XorFilter,
+    CuckooFilter, HyperLogLog, KllSketch, MinHash, QuotientFilter, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -148,6 +148,19 @@ fn xor_filter_round_trip_preserves_answers() {
     assert_eq!(restored.len(), filter.len());
     assert_eq!(restored.table_len(), filter.table_len());
     for i in (0..40_000_u64).step_by(3) {
+        assert_eq!(restored.contains_item(&i), filter.contains_item(&i));
+    }
+}
+
+#[test]
+fn quotient_filter_round_trip_preserves_answers() {
+    let mut filter = QuotientFilter::with_capacity_and_seed(10_000, 0.001, 5);
+    for i in 0..7_000_u64 {
+        filter.insert_item(&i).unwrap();
+    }
+    let restored: QuotientFilter = round_trip(&filter);
+    assert_eq!(restored.len(), filter.len());
+    for i in (0..10_000_u64).step_by(3) {
         assert_eq!(restored.contains_item(&i), filter.contains_item(&i));
     }
 }
