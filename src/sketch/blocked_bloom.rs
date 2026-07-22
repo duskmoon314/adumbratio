@@ -1,11 +1,13 @@
 //! Blocked Bloom filter implementation.
 
-use std::convert::Infallible;
-use std::hash::{BuildHasher, Hash};
+use core::convert::Infallible;
+use core::hash::{BuildHasher, Hash};
 
 use crate::error::MergeError;
 use crate::hash::{Blocked, DefaultBuildHasher};
-use crate::traits::{Contains, EstimateCardinality, Insert, Merge, Sketch};
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::traits::EstimateCardinality;
+use crate::traits::{Contains, Insert, Merge, Sketch};
 
 use super::{BloomFilter, BloomGeometry};
 
@@ -97,20 +99,26 @@ impl BlockedBloomFilter<DefaultBuildHasher> {
     /// Creates a blocked Bloom filter sized for an expected item count and
     /// target FPP, using the default cache-line block size.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero or if `false_positive_rate` is not
     /// in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
         Self::with_capacity_and_seed(expected_items, false_positive_rate, 0)
     }
 
     /// Creates a target-sized blocked Bloom filter with an explicit seed.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero or if `false_positive_rate` is not
     /// in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_capacity_and_seed(
         expected_items: u64,
         false_positive_rate: f64,
@@ -147,12 +155,18 @@ impl<S> BlockedBloomFilter<S> {
     /// Estimates the number of inserted distinct items from the fill ratio.
     ///
     /// Uses the classical Bloom estimate; blocking makes it approximate.
+    ///
+    /// Available with the `std` or `libm` feature.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn cardinality(&self) -> f64 {
         self.inner.cardinality()
     }
 
     /// Returns the classical Bloom false-positive probability after `items`
     /// inserts. The blocked realization is somewhat higher.
+    ///
+    /// Available with the `std` or `libm` feature.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn expected_fpp(&self, items: u64) -> f64 {
         self.inner.expected_fpp(items)
     }
@@ -226,6 +240,7 @@ where
     }
 }
 
+#[cfg(any(feature = "std", feature = "libm"))]
 impl<S> EstimateCardinality for BlockedBloomFilter<S> {
     fn cardinality(&self) -> f64 {
         self.cardinality()

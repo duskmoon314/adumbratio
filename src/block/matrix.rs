@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 /// A fixed-width collection of equally shaped storage rows.
 ///
 /// `Matrix` is intentionally thin: it owns row objects and records the row

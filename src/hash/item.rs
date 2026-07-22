@@ -1,6 +1,6 @@
 //! Deterministic item hashing.
 
-use std::hash::{BuildHasher, Hash, Hasher};
+use core::hash::{BuildHasher, Hash, Hasher};
 
 use super::mix64;
 

@@ -6,6 +6,10 @@
 //! entirely from the public block APIs, and custom compositions can be
 //! assembled from the same blocks.
 //!
+//! The crate is `no_std` (+`alloc`) compatible: disable default features
+//! for the core operations, and enable the optional `libm` feature when
+//! geometry solvers and error estimators are needed without `std`.
+//!
 //! ```
 //! use adumbratio::sketch::BloomFilter;
 //!
@@ -16,7 +20,13 @@
 //! assert!(!filter.contains_item("bob"));
 //! ```
 
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
+
+extern crate alloc;
+
+#[cfg(any(feature = "std", feature = "libm"))]
+mod float;
 
 pub mod block;
 pub mod error;

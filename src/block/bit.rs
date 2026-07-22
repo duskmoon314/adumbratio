@@ -1,3 +1,6 @@
+use alloc::boxed::Box;
+use alloc::vec;
+
 /// A packed array of single-bit cells.
 ///
 /// `BitArray` has no hashing or probabilistic semantics. It is the storage

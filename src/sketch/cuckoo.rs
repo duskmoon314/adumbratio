@@ -1,9 +1,11 @@
 //! Cuckoo filter implementation.
 
-use std::hash::{BuildHasher, Hash};
+use core::hash::{BuildHasher, Hash};
 
 use crate::block::{BucketArray, Fingerprint};
 use crate::error::SketchFull;
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::float;
 use crate::hash::{DefaultBuildHasher, PartialKeyCuckoo, hash_one};
 use crate::policy::{KickLoop, XorShift64};
 use crate::traits::{Contains, Insert, Remove, Sketch};
@@ -90,19 +92,25 @@ impl CuckooFilter<u16, DefaultBuildHasher> {
     /// with [`CuckooGeometry::for_capacity_with_bits`] and call
     /// [`CuckooFilter::from_geometry`] on the chosen `F`.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero or if `false_positive_rate` is not
     /// in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
         Self::with_capacity_and_seed(expected_items, false_positive_rate, 0)
     }
 
     /// Creates a seeded Cuckoo filter from capacity and target FPP.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics under the same conditions as [`Self::with_capacity`].
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_capacity_and_seed(
         expected_items: u64,
         false_positive_rate: f64,
@@ -185,8 +193,11 @@ impl<F: Fingerprint, S> CuckooFilter<F, S> {
     }
 
     /// Returns the approximate false-positive probability for this geometry.
+    ///
+    /// Available with the `std` or `libm` feature.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn expected_fpp(&self) -> f64 {
-        let denominator = 2_f64.powi(self.geometry.fingerprint_bits as i32);
+        let denominator = float::powi(2.0, self.geometry.fingerprint_bits as i32);
         ((2 * self.geometry.slots_per_bucket) as f64 / denominator).min(1.0)
     }
 
@@ -288,10 +299,13 @@ impl CuckooGeometry {
     /// Computes Cuckoo geometry from capacity and target FPP, using the
     /// default 16-bit (`u16`) fingerprint width.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics under the same conditions as
     /// [`Self::for_capacity_with_bits`].
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn for_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
         Self::for_capacity_with_bits(expected_items, false_positive_rate, 16)
     }
@@ -304,11 +318,14 @@ impl CuckooGeometry {
     /// be large enough that the fingerprint-collision bound
     /// `2 * slots / 2^bits` meets the target FPP.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero, if `false_positive_rate` is not in
     /// `0.0..1.0`, if `fingerprint_bits` is not in `1..=64`, or if the width
     /// cannot reach the target FPP.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn for_capacity_with_bits(
         expected_items: u64,
         false_positive_rate: f64,
@@ -330,13 +347,15 @@ impl CuckooGeometry {
         );
         let slots_per_bucket = 4;
         let achievable =
-            (2 * slots_per_bucket) as f64 / 2_f64.powi(fingerprint_bits as i32);
+            (2 * slots_per_bucket) as f64 / float::powi(2.0, fingerprint_bits as i32);
         assert!(
             achievable <= false_positive_rate,
             "fingerprint width {fingerprint_bits} bits cannot reach target false-positive rate {false_positive_rate} with {slots_per_bucket} slots per bucket; use a wider fingerprint type"
         );
         let load = 0.95;
-        let needed_buckets = ((expected_items as f64) / (slots_per_bucket as f64 * load)).ceil();
+        let needed_buckets = float::ceil(
+            (expected_items as f64) / (slots_per_bucket as f64 * load),
+        );
         assert!(
             needed_buckets <= usize::MAX as f64,
             "computed Cuckoo bucket count does not fit in usize"

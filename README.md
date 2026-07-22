@@ -176,7 +176,7 @@ subsequent runs.
 1. ✅ **Design** — [DESIGN.md](DESIGN.md)
 2. ✅ Storage/hashing/policy blocks + capability traits + Bloom filter, fully tested
 3. ✅ Counting Bloom, Count-Min (+CU), Count Sketch, Cuckoo filter
-4. ◐ Blocked Bloom ✅, seeded statistical/merge test suites ✅; `no_std`, `serde`, 0.1 release pending
+4. ◐ Blocked Bloom ✅, statistical/merge suites ✅, `serde` ✅, `no_std`(+`alloc`, optional `libm`) ✅; 0.1 release pending
 5. HyperLogLog, MinHash, top-k, benchmarks against existing crates
 
 ## License

@@ -1,3 +1,6 @@
+use alloc::boxed::Box;
+use alloc::vec;
+
 /// A packed array of fixed-width unsigned cells.
 ///
 /// Cells are packed tightly into `u64` words and may straddle word boundaries.

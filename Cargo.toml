@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+libm = { version = "0.2", optional = true }
 serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"], optional = true }
 
 [dev-dependencies]
@@ -18,3 +19,4 @@ harness = false
 default = ["std"]
 std = ["serde?/std"]
 serde = ["dep:serde"]
+libm = ["dep:libm"]

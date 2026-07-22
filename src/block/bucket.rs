@@ -1,4 +1,7 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
+
+use alloc::boxed::Box;
+use alloc::vec;
 
 use crate::error::BucketFull;
 use crate::policy::RngLite;

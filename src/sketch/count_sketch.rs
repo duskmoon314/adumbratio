@@ -1,10 +1,14 @@
 //! Count Sketch implementation.
 
-use std::convert::Infallible;
-use std::hash::{BuildHasher, Hash};
+use core::convert::Infallible;
+use core::hash::{BuildHasher, Hash};
+
+use alloc::vec::Vec;
 
 use crate::block::{Matrix, PackedArray};
 use crate::error::MergeError;
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::float;
 use crate::hash::{DefaultBuildHasher, hash_one, row_index, sign};
 use crate::traits::{EstimateCount, Insert, Merge, Sketch};
 
@@ -75,18 +79,24 @@ impl CountSketch<DefaultBuildHasher> {
 
     /// Creates a Count Sketch from target error parameters.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_error(epsilon: f64, delta: f64) -> Self {
         Self::with_error_and_seed(epsilon, delta, 0)
     }
 
     /// Creates a seeded Count Sketch from target error parameters.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_error_and_seed(epsilon: f64, delta: f64, seed: u64) -> Self {
         Self::from_geometry(CountSketchGeometry::for_error(epsilon, delta), seed)
     }
@@ -191,9 +201,12 @@ impl CountSketchGeometry {
     /// Uses `width = ceil(3 / epsilon^2)` and
     /// `depth = ceil(ln(1 / delta))`.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn for_error(epsilon: f64, delta: f64) -> Self {
         assert!(
             epsilon.is_finite() && epsilon > 0.0 && epsilon < 1.0,
@@ -203,8 +216,8 @@ impl CountSketchGeometry {
             delta.is_finite() && delta > 0.0 && delta < 1.0,
             "delta must be finite and in 0.0..1.0"
         );
-        let width = (3.0 / (epsilon * epsilon)).ceil();
-        let depth = (1.0 / delta).ln().ceil();
+        let width = float::ceil(3.0 / (epsilon * epsilon));
+        let depth = float::ceil(float::ln(1.0 / delta));
         assert!(
             width <= usize::MAX as f64 && depth <= usize::MAX as f64,
             "computed Count Sketch geometry does not fit in usize"

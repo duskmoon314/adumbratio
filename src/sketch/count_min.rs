@@ -1,11 +1,15 @@
 //! Count-Min Sketch implementation.
 
-use std::convert::Infallible;
-use std::hash::{BuildHasher, Hash};
-use std::marker::PhantomData;
+use core::convert::Infallible;
+use core::hash::{BuildHasher, Hash};
+use core::marker::PhantomData;
+
+use alloc::vec::Vec;
 
 use crate::block::{Matrix, PackedArray};
 use crate::error::MergeError;
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::float;
 use crate::hash::{DefaultBuildHasher, hash_one, row_index};
 use crate::policy::{ConservativeUpdate, PlainUpdate};
 use crate::traits::{EstimateCount, Insert, Merge, Sketch};
@@ -84,18 +88,24 @@ impl CountMinSketch<32, DefaultBuildHasher, PlainUpdate> {
     /// `epsilon` controls additive error and `delta` controls failure
     /// probability.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_error(epsilon: f64, delta: f64) -> Self {
         Self::with_error_and_seed(epsilon, delta, 0)
     }
 
     /// Creates a seeded plain Count-Min Sketch from target error parameters.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_error_and_seed(epsilon: f64, delta: f64, seed: u64) -> Self {
         Self::from_geometry(CountMinGeometry::for_error(epsilon, delta), seed)
     }
@@ -120,9 +130,12 @@ impl CountMinSketch<32, DefaultBuildHasher, PlainUpdate> {
 
     /// Creates a conservative-update Count-Min Sketch from target parameters.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn conservative_with_error(
         epsilon: f64,
         delta: f64,
@@ -132,9 +145,12 @@ impl CountMinSketch<32, DefaultBuildHasher, PlainUpdate> {
 
     /// Creates a seeded conservative-update Count-Min Sketch.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn conservative_with_error_and_seed(
         epsilon: f64,
         delta: f64,
@@ -283,9 +299,12 @@ impl CountMinGeometry {
     ///
     /// Uses `width = ceil(e / epsilon)` and `depth = ceil(ln(1 / delta))`.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `epsilon` or `delta` is not finite and in `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn for_error(epsilon: f64, delta: f64) -> Self {
         assert!(
             epsilon.is_finite() && epsilon > 0.0 && epsilon < 1.0,
@@ -295,8 +314,8 @@ impl CountMinGeometry {
             delta.is_finite() && delta > 0.0 && delta < 1.0,
             "delta must be finite and in 0.0..1.0"
         );
-        let width = (std::f64::consts::E / epsilon).ceil();
-        let depth = (1.0 / delta).ln().ceil();
+        let width = float::ceil(core::f64::consts::E / epsilon);
+        let depth = float::ceil(float::ln(1.0 / delta));
         assert!(
             width <= usize::MAX as f64 && depth <= usize::MAX as f64,
             "computed Count-Min geometry does not fit in usize"

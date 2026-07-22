@@ -1,6 +1,6 @@
 //! Error types shared by sketch implementations.
 
-use std::fmt;
+use core::fmt;
 
 /// Error returned when two sketches cannot be merged safely.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,7 +21,7 @@ impl fmt::Display for MergeError {
     }
 }
 
-impl std::error::Error for MergeError {}
+impl core::error::Error for MergeError {}
 
 /// Error returned when a bucket cannot accept another fingerprint.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -34,7 +34,7 @@ impl fmt::Display for BucketFull {
     }
 }
 
-impl std::error::Error for BucketFull {}
+impl core::error::Error for BucketFull {}
 
 /// Error returned when a bounded sketch cannot accept another item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,4 +63,4 @@ impl fmt::Display for SketchFull {
     }
 }
 
-impl std::error::Error for SketchFull {}
+impl core::error::Error for SketchFull {}

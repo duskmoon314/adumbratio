@@ -1,12 +1,16 @@
 //! Bloom filter implementation.
 
-use std::convert::Infallible;
-use std::hash::{BuildHasher, Hash};
+use core::convert::Infallible;
+use core::hash::{BuildHasher, Hash};
 
 use crate::block::BitArray;
 use crate::error::MergeError;
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::float;
 use crate::hash::{DefaultBuildHasher, DoubleHashing, IndexScheme, hash_one};
-use crate::traits::{Contains, EstimateCardinality, Insert, Merge, Sketch};
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::traits::EstimateCardinality;
+use crate::traits::{Contains, Insert, Merge, Sketch};
 
 /// Explicit Bloom filter geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,20 +80,26 @@ impl BloomFilter<DefaultBuildHasher, DoubleHashing> {
     /// The seed is zero. Use [`Self::with_capacity_and_seed`] when merge
     /// compatibility must be controlled explicitly.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero or if `false_positive_rate` is not in
     /// `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
         Self::with_capacity_and_seed(expected_items, false_positive_rate, 0)
     }
 
     /// Creates a target-sized Bloom filter with an explicit hash seed.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero or if `false_positive_rate` is not in
     /// `0.0..1.0`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn with_capacity_and_seed(
         expected_items: u64,
         false_positive_rate: f64,
@@ -146,6 +156,9 @@ impl<S, I> BloomFilter<S, I> {
     }
 
     /// Estimates the number of inserted distinct items from the fill ratio.
+    ///
+    /// Available with the `std` or `libm` feature.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn cardinality(&self) -> f64 {
         let set_bits = self.bits.count_ones();
         if set_bits == 0 {
@@ -157,17 +170,20 @@ impl<S, I> BloomFilter<S, I> {
 
         let m = self.geometry.bits as f64;
         let k = self.geometry.hashes as f64;
-        -(m / k) * (1.0 - set_bits as f64 / m).ln()
+        -(m / k) * float::ln(1.0 - set_bits as f64 / m)
     }
 
     /// Returns the expected false-positive probability after `items` inserts.
+    ///
+    /// Available with the `std` or `libm` feature.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn expected_fpp(&self, items: u64) -> f64 {
         if items == 0 {
             return 0.0;
         }
         let m = self.geometry.bits as f64;
         let k = self.geometry.hashes as f64;
-        (1.0 - (-(k * items as f64) / m).exp()).powf(k)
+        float::powf(1.0 - float::exp(-(k * items as f64) / m), k)
     }
 
     /// Returns the byte length of the bit storage.
@@ -215,10 +231,13 @@ where
 impl BloomGeometry {
     /// Computes the standard Bloom geometry for `expected_items` and FPP.
     ///
+    /// Available with the `std` or `libm` feature.
+    ///
     /// # Panics
     ///
     /// Panics if `expected_items` is zero, if `false_positive_rate` is not in
     /// `0.0..1.0`, or if the computed bit count does not fit in `usize`.
+    #[cfg(any(feature = "std", feature = "libm"))]
     pub fn for_capacity(expected_items: u64, false_positive_rate: f64) -> Self {
         assert!(
             expected_items > 0,
@@ -232,15 +251,15 @@ impl BloomGeometry {
         );
 
         let n = expected_items as f64;
-        let ln2 = std::f64::consts::LN_2;
-        let bits = (-(n * false_positive_rate.ln()) / (ln2 * ln2)).ceil();
+        let ln2 = core::f64::consts::LN_2;
+        let bits = float::ceil(-(n * float::ln(false_positive_rate)) / (ln2 * ln2));
         assert!(
             bits.is_finite() && bits <= usize::MAX as f64,
             "computed Bloom filter bit count does not fit in usize"
         );
 
         let bits = bits.max(1.0) as usize;
-        let hashes = ((bits as f64 / n) * ln2).round().max(1.0) as usize;
+        let hashes = float::round((bits as f64 / n) * ln2).max(1.0) as usize;
         Self { bits, hashes }
     }
 
@@ -267,10 +286,17 @@ impl<S, I> Sketch for BloomFilter<S, I> {
     }
 
     fn len_hint(&self) -> Option<u64> {
-        let estimate = self.cardinality();
-        if estimate.is_finite() && estimate >= 0.0 && estimate <= u64::MAX as f64 {
-            Some(estimate.round() as u64)
-        } else {
+        #[cfg(any(feature = "std", feature = "libm"))]
+        {
+            let estimate = self.cardinality();
+            if estimate.is_finite() && estimate >= 0.0 && estimate <= u64::MAX as f64 {
+                Some(float::round(estimate) as u64)
+            } else {
+                None
+            }
+        }
+        #[cfg(not(any(feature = "std", feature = "libm")))]
+        {
             None
         }
     }
@@ -305,6 +331,7 @@ where
     }
 }
 
+#[cfg(any(feature = "std", feature = "libm"))]
 impl<S, I> EstimateCardinality for BloomFilter<S, I> {
     fn cardinality(&self) -> f64 {
         self.cardinality()

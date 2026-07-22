@@ -281,7 +281,12 @@ pub fn sign(hash: u64, row: usize) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Blocked, DoubleHashing, EnhancedDoubleHashing, IndexScheme, Partitioned, reduce, row_index, sign};
+    use alloc::vec::Vec;
+
+    use super::{
+        Blocked, DoubleHashing, EnhancedDoubleHashing, IndexScheme, Partitioned, reduce, row_index,
+        sign,
+    };
 
     #[test]
     fn reduction_stays_in_range() {
