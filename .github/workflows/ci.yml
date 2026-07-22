@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check feature matrix
+        run: |
+          cargo check --no-default-features
+          cargo check --no-default-features --features libm
+          cargo check --no-default-features --features serde
+          cargo check --all-features
+
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+      - name: Test (default features)
+        run: cargo test
+
+      - name: Test (serde)
+        run: cargo test --features serde
+
+      - name: Test (no_std + libm)
+        run: cargo test --no-default-features --features libm
+
+      - name: Build examples and benches
+        run: |
+          cargo build --release --examples
+          cargo build --release --benches

@@ -145,7 +145,7 @@ where
                 (item.clone(), estimate)
             })
             .collect();
-        items.sort_by(|a, b| b.1.cmp(&a.1));
+        items.sort_by_key(|item| core::cmp::Reverse(item.1));
         items
     }
 

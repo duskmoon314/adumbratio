@@ -183,5 +183,5 @@ subsequent runs.
 
 ## License
 
-Not yet chosen — will follow the usual Rust convention
-(`MIT OR Apache-2.0`) unless decided otherwise before the first release.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option — the usual Rust convention.
