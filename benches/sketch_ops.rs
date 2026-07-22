@@ -414,6 +414,31 @@ fn bench_quotient_filter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_simhash(c: &mut Criterion) {
+    let mut group = c.benchmark_group("simhash");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let mut sketch = adumbratio::sketch::SimHash::new();
+    let mut other = adumbratio::sketch::SimHash::new();
+    for item in &present {
+        sketch.insert_item(item);
+        other.insert_item(item);
+    }
+
+    group.bench_function("insert", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            sketch.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("hamming_distance", |b| {
+        b.iter(|| black_box(sketch.hamming_distance(black_box(&other))));
+    });
+    group.finish();
+}
+
 fn bench_theta(c: &mut Criterion) {
     let mut group = c.benchmark_group("theta");
     quick(&mut group);
@@ -492,6 +517,7 @@ criterion_group!(
     bench_kll,
     bench_minhash,
     bench_quotient_filter,
+    bench_simhash,
     bench_theta,
     bench_top_k,
     bench_xor_filter,

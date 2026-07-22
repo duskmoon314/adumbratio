@@ -6,8 +6,8 @@
 
 use adumbratio::sketch::{
     BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter, HyperLogLog, KllSketch, MinHash, QuotientFilter, ThetaSketch, TopK,
-    XorFilter,
+    CuckooFilter, HyperLogLog, KllSketch, MinHash, QuotientFilter, SimHash, ThetaSketch,
+    TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -175,6 +175,17 @@ fn theta_round_trip_preserves_estimates() {
     let restored: ThetaSketch = round_trip(&sketch);
     assert_eq!(restored.retained(), sketch.retained());
     assert_eq!(restored.cardinality(), sketch.cardinality());
+}
+
+#[test]
+fn simhash_round_trip_preserves_signature() {
+    let mut sketch = SimHash::with_seed(3);
+    for i in 0..10_000_u64 {
+        sketch.insert_item(&i);
+    }
+    let restored: SimHash = round_trip(&sketch);
+    assert_eq!(restored.signature(), sketch.signature());
+    assert_eq!(restored.sums(), sketch.sums());
 }
 
 #[test]

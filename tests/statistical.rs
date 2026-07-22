@@ -573,6 +573,42 @@ fn theta_estimates_set_operations_within_standard_errors() {
 }
 
 #[test]
+fn simhash_cosine_tracks_incidence_cosine() {
+    use adumbratio::sketch::SimHash;
+
+    // Equal-size sets with controlled overlap: incidence cosine = c / s.
+    // A 64-bit signature is coarse (angle noise ~0.2 rad), so the checks
+    // are absolute bounds plus unbiasedness over seeds.
+    let s = 20_000_u64;
+    for (c, truth) in [(0_u64, 0.0_f64), (5_000, 0.25), (10_000, 0.5), (15_000, 0.75)] {
+        let mut estimates = Vec::new();
+        for seed in 1..=3_u64 {
+            let mut a = SimHash::with_seed(seed);
+            let mut b = SimHash::with_seed(seed);
+            for i in 0..(s - c) {
+                a.insert_item(&i);
+                b.insert_item(&(1_000_000 + i));
+            }
+            for i in 0..c {
+                a.insert_item(&(2_000_000 + i));
+                b.insert_item(&(2_000_000 + i));
+            }
+            let estimate = a.estimated_cosine(&b);
+            assert!(
+                (estimate - truth).abs() <= 0.35,
+                "cosine truth {truth}: estimate {estimate} beyond the 64-bit noise bound"
+            );
+            estimates.push(estimate);
+        }
+        let mean: f64 = estimates.iter().sum::<f64>() / estimates.len() as f64;
+        assert!(
+            (mean - truth).abs() <= 0.2,
+            "cosine truth {truth}: mean {mean} off by more than 0.2"
+        );
+    }
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

@@ -55,12 +55,13 @@ blocks when a workload needs a custom composition.
 | xor filter | static membership, ~1.23·log2(1/ε) bits/item | 3-segment xor table + hypergraph peeling | ✅ 6 |
 | quotient filter | membership + deletion + merge, cache-linear | `PackedArray<R>` remainders + 3 `BitArray` metadata rows | ✅ 6 |
 | theta sketch | cardinality + union/intersection/difference | bottom-k (k smallest hashes) | ✅ 7 |
+| SimHash | cosine similarity | sign pattern of ±1 bit sums (linear merge) | ✅ 7 |
 
 ## Planned sketches
 
 | Sketch | Answers | Stage |
 |---|---|---|
-| SimHash, AMS, Misra–Gries, Space-Saving | cosine similarity, L2 norm, deterministic heavy hitters | 7 |
+| AMS, Misra–Gries, Space-Saving | L2 norm, deterministic heavy hitters | 7 |
 | binary fuse / ribbon, b-bit MinHash, DDSketch, IBLT, … | further family breadth | 8 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),
