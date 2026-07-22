@@ -54,12 +54,13 @@ blocks when a workload needs a custom composition.
 | KLL | quantiles / rank (~1/k error) | compactor hierarchy (levels of sorted buffers) | ✅ 6 |
 | xor filter | static membership, ~1.23·log2(1/ε) bits/item | 3-segment xor table + hypergraph peeling | ✅ 6 |
 | quotient filter | membership + deletion + merge, cache-linear | `PackedArray<R>` remainders + 3 `BitArray` metadata rows | ✅ 6 |
+| theta sketch | cardinality + union/intersection/difference | bottom-k (k smallest hashes) | ✅ 7 |
 
 ## Planned sketches
 
 | Sketch | Answers | Stage |
 |---|---|---|
-| theta sketch, SimHash, AMS, Misra–Gries, Space-Saving | set ops, cosine similarity, L2 norm, deterministic heavy hitters | 7 |
+| SimHash, AMS, Misra–Gries, Space-Saving | cosine similarity, L2 norm, deterministic heavy hitters | 7 |
 | binary fuse / ribbon, b-bit MinHash, DDSketch, IBLT, … | further family breadth | 8 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),

@@ -10,6 +10,7 @@ mod hyperloglog;
 mod kll;
 mod minhash;
 mod quotient;
+mod theta;
 mod top_k;
 mod xor_filter;
 
@@ -23,5 +24,6 @@ pub use hyperloglog::HyperLogLog;
 pub use kll::KllSketch;
 pub use minhash::MinHash;
 pub use quotient::{QuotientFilter, QuotientGeometry};
+pub use theta::ThetaSketch;
 pub use top_k::TopK;
 pub use xor_filter::XorFilter;

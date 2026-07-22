@@ -414,6 +414,34 @@ fn bench_quotient_filter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_theta(c: &mut Criterion) {
+    let mut group = c.benchmark_group("theta");
+    quick(&mut group);
+
+    let present = items(100_000, 1);
+    let mut sketch = adumbratio::sketch::ThetaSketch::new(512);
+    let mut other = adumbratio::sketch::ThetaSketch::new(512);
+    for item in &present {
+        sketch.insert_item(item);
+        other.insert_item(item);
+    }
+
+    group.bench_function("insert", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            sketch.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("cardinality", |b| {
+        b.iter(|| black_box(sketch.cardinality()));
+    });
+    group.bench_function("estimate_intersection", |b| {
+        b.iter(|| black_box(sketch.estimate_intersection(black_box(&other))));
+    });
+    group.finish();
+}
+
 fn bench_packed_array(c: &mut Criterion) {
     let mut group = c.benchmark_group("packed_array");
     quick(&mut group);
@@ -464,6 +492,7 @@ criterion_group!(
     bench_kll,
     bench_minhash,
     bench_quotient_filter,
+    bench_theta,
     bench_top_k,
     bench_xor_filter,
     bench_packed_array,

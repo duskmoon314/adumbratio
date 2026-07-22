@@ -518,6 +518,61 @@ fn quotient_filter_high_load_fpp_and_wrap() {
 }
 
 #[test]
+fn theta_estimates_set_operations_within_standard_errors() {
+    use adumbratio::sketch::ThetaSketch;
+
+    // Two sets of 50_000 with a controlled overlap of 12_500, so
+    // |A| = |B| = 50k, |A∩B| = 12.5k, |A∪B| = 87.5k, |A\B| = 37.5k.
+    // Set-operation estimates are unbiased but noisier than plain
+    // cardinality; check the mean over seeds (unbiasedness) and each
+    // estimate against a generous breakage bound.
+    let (k, size, overlap) = (1_024_usize, 50_000_u64, 12_500_u64);
+    let pair = |seed: u64| {
+        let mut a = ThetaSketch::with_seed(k, seed);
+        let mut b = ThetaSketch::with_seed(k, seed);
+        for i in 0..(size - overlap) {
+            a.insert_item(&i);
+            b.insert_item(&(1_000_000 + i));
+        }
+        for i in 0..overlap {
+            a.insert_item(&(2_000_000 + i));
+            b.insert_item(&(2_000_000 + i));
+        }
+        (a, b)
+    };
+
+    let truths = [("union", 87_500.0), ("intersection", 12_500.0), ("difference", 37_500.0)];
+    let mut means = [0.0_f64; 3];
+    for seed in 1..=5_u64 {
+        let (a, b) = pair(seed);
+        let estimates = [
+            a.estimate_union(&b),
+            a.estimate_intersection(&b),
+            a.estimate_difference(&b),
+        ];
+        for (i, estimate) in estimates.iter().enumerate() {
+            means[i] += estimate / 5.0;
+            let relative = (estimate - truths[i].1).abs() / truths[i].1;
+            assert!(
+                relative <= 0.30,
+                "{}: estimate {estimate} vs truth {} beyond the breakage bound",
+                truths[i].0,
+                truths[i].1
+            );
+        }
+    }
+    for (i, (name, truth)) in truths.iter().enumerate() {
+        let relative = (means[i] - truth).abs() / truth;
+        assert!(
+            relative <= 0.05,
+            "{name}: mean estimate {} vs truth {truth} off by {:.2}%",
+            means[i],
+            relative * 100.0
+        );
+    }
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

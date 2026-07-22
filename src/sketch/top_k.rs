@@ -48,6 +48,13 @@ use crate::traits::{Insert, Merge, Sketch};
 ///   <https://doi.org/10.1016/j.jalgor.2003.12.001>
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "T: serde::Serialize + Eq + core::hash::Hash, S: serde::Serialize",
+        deserialize = "T: serde::Deserialize<'de> + Eq + core::hash::Hash, S: serde::Deserialize<'de>"
+    ))
+)]
 pub struct TopK<T, S = crate::hash::DefaultBuildHasher> {
     sketch: CountMinSketch<32, S>,
     candidates: Vec<T>,

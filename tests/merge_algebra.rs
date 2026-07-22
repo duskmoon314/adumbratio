@@ -216,6 +216,33 @@ fn minhash_merge_matches_single_sketch() {
 }
 
 #[test]
+fn theta_merge_matches_single_sketch_and_commutes() {
+    use adumbratio::sketch::ThetaSketch;
+
+    let mut left = ThetaSketch::with_seed(256, 9);
+    let mut right = ThetaSketch::with_seed(256, 9);
+    let mut single = ThetaSketch::with_seed(256, 9);
+
+    for i in 0..20_000_u64 {
+        left.insert_item(&i);
+        single.insert_item(&i);
+    }
+    for i in 20_000..40_000_u64 {
+        right.insert_item(&i);
+        single.insert_item(&i);
+    }
+
+    let mut forward = left.clone();
+    forward.merge_from(&right).unwrap();
+    let mut backward = right.clone();
+    backward.merge_from(&left).unwrap();
+
+    // Bottom-k of the union is deterministic: retained lists are identical.
+    assert_eq!(forward.retained(), single.retained());
+    assert_eq!(forward.retained(), backward.retained());
+}
+
+#[test]
 fn merge_rejects_incompatible_sketches() {
     let geometry = CountMinGeometry {
         width: 128,
