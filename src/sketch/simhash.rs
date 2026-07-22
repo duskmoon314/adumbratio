@@ -45,7 +45,7 @@ pub const SIMHASH_BITS: usize = 64;
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SimHash<S = DefaultBuildHasher> {
-    sums: Box<[i64; SIMHASH_BITS]>,
+    sums: Box<[i64]>,
     seed_fingerprint: u64,
     hasher: S,
 }
@@ -73,7 +73,7 @@ impl<S> SimHash<S> {
     /// Creates a SimHash sketch from explicit components.
     pub fn from_parts(seed_fingerprint: u64, hasher: S) -> Self {
         Self {
-            sums: Box::new([0; SIMHASH_BITS]),
+            sums: alloc::vec![0_i64; SIMHASH_BITS].into_boxed_slice(),
             seed_fingerprint,
             hasher,
         }
@@ -85,7 +85,7 @@ impl<S> SimHash<S> {
     }
 
     /// Returns the current per-bit sums.
-    pub fn sums(&self) -> &[i64; SIMHASH_BITS] {
+    pub fn sums(&self) -> &[i64] {
         &self.sums
     }
 
@@ -102,7 +102,7 @@ impl<S> SimHash<S> {
 
     /// Returns the byte length of the sum storage.
     pub fn storage_bytes(&self) -> usize {
-        size_of::<[i64; SIMHASH_BITS]>()
+        SIMHASH_BITS * size_of::<i64>()
     }
 
     /// Clears all sums.

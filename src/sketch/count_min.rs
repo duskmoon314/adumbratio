@@ -54,6 +54,13 @@ pub struct CountMinGeometry {
 /// increments only cells equal to the current minimum, reducing overestimation
 /// bias while preserving the same query path.
 ///
+/// # Saturation
+///
+/// Counters pin at `2^BITS - 1` instead of wrapping. With the default
+/// `BITS = 32` this is unreachable in practice; with narrow counters a
+/// pinned cell stops counting and estimates may underestimate. Monitor
+/// [`CountMinSketch::saturated_cells`] when using narrow counters.
+///
 /// # References
 ///
 /// - Graham Cormode and S. Muthukrishnan, "An Improved Data Stream Summary:
@@ -216,6 +223,30 @@ impl<const BITS: u32, S, U> CountMinSketch<BITS, S, U> {
             row.clear();
         }
         self.total_count = 0;
+    }
+
+    /// Returns the number of counter cells pinned at their maximum value.
+    ///
+    /// With narrow counters (`BITS` 8 or 16), heavy streams can pin cells
+    /// at `2^BITS - 1`. A pinned counter stops counting, so estimates may
+    /// **under**estimate — the "never underestimates" guarantee no longer
+    /// holds. If this returns non-zero, use wider counters (the default
+    /// `BITS = 32` saturates only past four billion) or a wider sketch.
+    pub fn saturated_cells(&self) -> usize {
+        self.rows
+            .iter()
+            .map(|row| {
+                (0..self.geometry.width)
+                    .filter(|&index| row.get(index) == PackedArray::<BITS>::MAX)
+                    .count()
+            })
+            .sum()
+    }
+
+    /// Returns whether any counter cell is pinned at its maximum value; see
+    /// [`Self::saturated_cells`].
+    pub fn is_saturated(&self) -> bool {
+        self.saturated_cells() > 0
     }
 
     fn row_indices(&self, hash: u64) -> impl Iterator<Item = usize> + '_ {
@@ -410,6 +441,7 @@ impl<const BITS: u32, S, U> Merge for CountMinSketch<BITS, S, U> {
 #[cfg(test)]
 mod tests {
     use super::{CountMinGeometry, CountMinSketch};
+    use crate::policy::PlainUpdate;
     use crate::traits::{EstimateCount, Insert, Merge};
 
     #[test]
@@ -434,6 +466,31 @@ mod tests {
         Insert::<str>::insert(&mut sketch, "a").unwrap();
 
         assert!(EstimateCount::<str>::estimate(&sketch, "a") >= 2);
+    }
+
+    #[test]
+    fn narrow_counters_report_saturation() {
+        let mut sketch = CountMinSketch::<8>::from_parts(
+            CountMinGeometry {
+                width: 128,
+                depth: 4,
+            },
+            0,
+            crate::hash::DefaultBuildHasher::new(0),
+            PlainUpdate,
+        );
+        assert!(!sketch.is_saturated());
+        assert_eq!(sketch.saturated_cells(), 0);
+
+        for _ in 0..300 {
+            sketch.insert_item("hot");
+        }
+        // 8-bit counters pin at 255: all four of the item's row counters.
+        assert!(sketch.is_saturated());
+        assert_eq!(sketch.saturated_cells(), 4);
+        // And the guarantee is visibly broken: the estimate is below the
+        // true count of 300.
+        assert_eq!(sketch.estimate_item("hot"), 255);
     }
 
     #[test]
