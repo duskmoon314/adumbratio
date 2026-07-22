@@ -35,7 +35,9 @@ use crate::traits::{Insert, Merge, Sketch};
 ///
 /// Candidate membership is checked by a linear scan, so one insert costs
 /// `O(k)` comparisons on top of the sketch update — fine for analytics
-/// companions, not for line-rate data planes.
+/// companions, not for line-rate data planes. With `std`, a hash index plus
+/// a lazy versioned min-heap make inserts `O(log k)` instead; the `no_std`
+/// fallback keeps the linear scan.
 ///
 /// # References
 ///
@@ -50,6 +52,17 @@ pub struct TopK<T, S = crate::hash::DefaultBuildHasher> {
     sketch: CountMinSketch<32, S>,
     candidates: Vec<T>,
     k: usize,
+    /// Maps candidate items to their slot in `candidates` (`std` fast path).
+    #[cfg(feature = "std")]
+    index: std::collections::HashMap<T, usize>,
+    /// Min-heap of `(estimate, version, slot)`; entries go stale as
+    /// estimates grow and are discarded lazily on eviction.
+    #[cfg(feature = "std")]
+    heap: std::collections::BinaryHeap<std::cmp::Reverse<(u64, u64, usize)>>,
+    /// Per-slot version counter distinguishing live heap entries from stale
+    /// ones; reset when a slot changes identity.
+    #[cfg(feature = "std")]
+    versions: Vec<u64>,
 }
 
 impl<T> TopK<T, crate::hash::DefaultBuildHasher> {
@@ -92,6 +105,12 @@ impl<T, S> TopK<T, S> {
             sketch,
             candidates: Vec::new(),
             k,
+            #[cfg(feature = "std")]
+            index: std::collections::HashMap::new(),
+            #[cfg(feature = "std")]
+            heap: std::collections::BinaryHeap::new(),
+            #[cfg(feature = "std")]
+            versions: Vec::new(),
         }
     }
 
@@ -119,6 +138,12 @@ impl<T, S> TopK<T, S> {
     pub fn clear(&mut self) {
         self.sketch.clear();
         self.candidates.clear();
+        #[cfg(feature = "std")]
+        {
+            self.index.clear();
+            self.heap.clear();
+            self.versions.clear();
+        }
     }
 
     /// Returns the byte length of the sketch storage (excluding candidates).
@@ -149,7 +174,58 @@ where
         items
     }
 
-    /// Inserts one occurrence of `item` and maintains the candidate set.
+    /// Inserts one occurrence of `item` and maintains the candidate set
+    /// (`std` fast path: hash index + lazy min-heap, `O(log k)`).
+    #[cfg(feature = "std")]
+    pub fn insert_item(&mut self, item: &T)
+    where
+        T: Clone,
+    {
+        use std::cmp::Reverse;
+
+        self.sketch.insert_item(item);
+
+        if let Some(&slot) = self.index.get(item) {
+            let estimate = self.sketch.estimate_item(item);
+            self.versions[slot] += 1;
+            self.heap.push(Reverse((estimate, self.versions[slot], slot)));
+            return;
+        }
+        if self.candidates.len() < self.k {
+            let slot = self.candidates.len();
+            let estimate = self.sketch.estimate_item(item);
+            self.candidates.push(item.clone());
+            self.index.insert(item.clone(), slot);
+            self.versions.push(0);
+            self.heap.push(Reverse((estimate, 0, slot)));
+            return;
+        }
+
+        // Find the freshest minimum, discarding stale heap entries.
+        let (min_estimate, victim) = loop {
+            let Reverse((estimate, version, slot)) =
+                self.heap.pop().expect("heap is non-empty when the candidate set is full");
+            if self.versions[slot] == version {
+                break (estimate, slot);
+            }
+        };
+        let estimate = self.sketch.estimate_item(item);
+        if estimate > min_estimate {
+            self.index.remove(&self.candidates[victim]);
+            self.index.insert(item.clone(), victim);
+            self.candidates[victim] = item.clone();
+            self.versions[victim] = 0;
+            self.heap.push(Reverse((estimate, 0, victim)));
+        } else {
+            // Not evicting after all: return the minimum entry to the heap.
+            self.heap
+                .push(Reverse((min_estimate, self.versions[victim], victim)));
+        }
+    }
+
+    /// Inserts one occurrence of `item` and maintains the candidate set
+    /// (`no_std` fallback: `O(k)` linear scan).
+    #[cfg(not(feature = "std"))]
     pub fn insert_item(&mut self, item: &T)
     where
         T: Clone,
@@ -245,6 +321,22 @@ where
                     .cmp(&self.sketch.estimate_item(a))
             });
         self.candidates.truncate(self.k);
+
+        // Rebuild the fast-path index and heap from the new candidate set.
+        #[cfg(feature = "std")]
+        {
+            use std::cmp::Reverse;
+
+            self.index.clear();
+            self.heap.clear();
+            self.versions.clear();
+            for (slot, item) in self.candidates.iter().enumerate() {
+                self.index.insert(item.clone(), slot);
+                self.versions.push(0);
+                let estimate = self.sketch.estimate_item(item);
+                self.heap.push(Reverse((estimate, 0, slot)));
+            }
+        }
         Ok(())
     }
 }
@@ -314,6 +406,35 @@ mod tests {
         for (rank, (item, _)) in ranked.iter().enumerate() {
             assert_eq!(*item, rank as u64);
         }
+    }
+
+    #[test]
+    fn eviction_stays_correct_with_stale_heap_entries() {
+        // Heavy updates to a few candidates create many stale heap entries;
+        // eviction must still pick the true weakest candidate.
+        let mut top = TopK::new(3, 0.001, 0.01);
+        for _ in 0..100 {
+            top.insert_item(&10_u64);
+            top.insert_item(&11_u64);
+            top.insert_item(&12_u64);
+        }
+        // A new item heavier than the weakest (12 is weakest with 100 < 101?).
+        for _ in 0..101 {
+            top.insert_item(&13_u64);
+        }
+        let ranked = top.top_k();
+        assert!(ranked.iter().any(|(item, _)| *item == 13));
+        // The weakest of the original three (all tied at 100) may survive as
+        // any two of them; the key assertion is the candidate count and that
+        // 13 displaced one of the originals.
+        assert_eq!(ranked.len(), 3);
+        assert!(
+            ranked
+                .iter()
+                .filter(|(item, _)| [10, 11, 12].contains(item))
+                .count()
+                == 2
+        );
     }
 
     #[test]
