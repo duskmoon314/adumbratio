@@ -38,3 +38,15 @@ jobs:
         run: |
           cargo build --release --examples
           cargo build --release --benches
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+
+      # Library only: dev-dependencies are allowed to need newer toolchains.
+      - name: Check feature matrix at MSRV (stable minus 2)
+        run: |
+          cargo check --no-default-features
+          cargo check --all-features
