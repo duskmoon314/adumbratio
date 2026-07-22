@@ -251,6 +251,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::TopK;
     use crate::traits::{Insert, Merge, Sketch};
 

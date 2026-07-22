@@ -2,9 +2,10 @@
 //!
 //! `adumbratio` decomposes sketches into storage, hashing, policy, and
 //! composed-sketch layers. The ready-made sketches — Bloom, counting Bloom,
-//! blocked Bloom, Count-Min, Count Sketch, and Cuckoo filter — are built
-//! entirely from the public block APIs, and custom compositions can be
-//! assembled from the same blocks.
+//! blocked Bloom, Count-Min, Count Sketch, Cuckoo filter, HyperLogLog,
+//! MinHash, and a top-k heavy-hitters companion — are built entirely from
+//! the public block APIs, and custom compositions can be assembled from the
+//! same blocks.
 //!
 //! The crate is `no_std` (+`alloc`) compatible: disable default features
 //! for the core operations, and enable the optional `libm` feature when
