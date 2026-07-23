@@ -17,11 +17,8 @@ fn round_trip<T>(sketch: &T) -> T
 where
     T: serde::Serialize + for<'de> serde::Deserialize<'de>,
 {
-    let bytes =
-        bincode::serde::encode_to_vec(sketch, bincode::config::standard()).expect("serialize");
-    bincode::serde::decode_from_slice(&bytes, bincode::config::standard())
-        .expect("deserialize")
-        .0
+    let bytes = postcard::to_allocvec(sketch).expect("serialize");
+    postcard::from_bytes(&bytes).expect("deserialize")
 }
 
 #[test]
