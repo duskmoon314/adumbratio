@@ -60,12 +60,14 @@ blocks when a workload needs a custom composition.
 | Misra–Gries | deterministic heavy hitters (lower bounds) | k counters + decrement-all | ✅ 7 |
 | Space-Saving | deterministic heavy hitters (upper bounds) | k entries + replace-the-minimum | ✅ 7 |
 | binary fuse filter | static membership, ~1.125·f bits/item | fuse-schedule xor table + hypergraph peeling | ✅ 8 |
+| b-bit MinHash | set similarity, 8× smaller signatures | low-b bits of minima + collision correction | ✅ 8 |
+| DDSketch | quantiles with relative error ±α | logarithmic buckets, count-per-bucket | ✅ 8 |
 
 ## Planned sketches
 
 | Sketch | Answers | Stage |
 |---|---|---|
-| b-bit MinHash / HyperMinHash, DDSketch / t-digest, IBLT, … | similarity+joint, quantiles, set reconciliation | 8 |
+| semi-sorted cuckoo variant, IBLT, HLL sparse mode | smaller cuckoo, set reconciliation, memory-frugal cardinality | 8 |
 
 Each sketch's doc comments cite the paper it reproduces (with DOI links),
 and the integration tests in `tests/` validate the paper's guarantees

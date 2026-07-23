@@ -6,9 +6,9 @@
 
 use adumbratio::sketch::{
     AmsSketch, BBitMinHash, BinaryFuseFilter, BlockedBloomFilter, BloomFilter,
-    CountMinSketch, CountSketch, CountingBloomFilter, CuckooFilter, HyperLogLog,
-    KllSketch, MinHash, MisraGries, QuotientFilter, SimHash, SpaceSaving, ThetaSketch,
-    TopK, XorFilter,
+    CountMinSketch, CountSketch, CountingBloomFilter, CuckooFilter, DdSketch,
+    HyperLogLog, KllSketch, MinHash, MisraGries, QuotientFilter, SimHash, SpaceSaving,
+    ThetaSketch, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -240,6 +240,18 @@ fn bbit_minhash_round_trip_preserves_signature() {
     }
     let restored: BBitMinHash<8> = round_trip(&sketch);
     assert_eq!(restored.signature(), sketch.signature());
+}
+
+#[test]
+fn ddsketch_round_trip_preserves_quantiles() {
+    let mut sketch = DdSketch::new(0.02);
+    for i in 1..=10_000_u64 {
+        sketch.insert_item(&(i as f64));
+    }
+    let restored: DdSketch = round_trip(&sketch);
+    assert_eq!(restored.count(), sketch.count());
+    assert_eq!(restored.buckets(), sketch.buckets());
+    assert_eq!(restored.quantile(0.99), sketch.quantile(0.99));
 }
 
 #[test]

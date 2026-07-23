@@ -414,6 +414,32 @@ fn bench_quotient_filter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_ddsketch(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ddsketch");
+    quick(&mut group);
+
+    let present: Vec<f64> = items(100_000, 1)
+        .into_iter()
+        .map(|v| (v % 1_000_000) as f64 + 1.0)
+        .collect();
+    let mut sketch = adumbratio::sketch::DdSketch::new(0.02);
+    for item in &present {
+        sketch.insert_item(item);
+    }
+
+    group.bench_function("insert", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            sketch.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("quantile", |b| {
+        b.iter(|| black_box(sketch.quantile(black_box(0.99))));
+    });
+    group.finish();
+}
+
 fn bench_bbit_minhash(c: &mut Criterion) {
     let mut group = c.benchmark_group("bbit_minhash");
     quick(&mut group);
@@ -623,6 +649,7 @@ criterion_group!(
     bench_count_min,
     bench_count_sketch,
     bench_cuckoo,
+    bench_ddsketch,
     bench_frequent,
     bench_hyperloglog,
     bench_kll,

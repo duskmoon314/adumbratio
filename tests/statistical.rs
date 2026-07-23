@@ -747,6 +747,40 @@ fn bbit_minhash_jaccard_within_tolerance() {
 }
 
 #[test]
+fn ddsketch_relative_error_holds_across_quantiles() {
+    use adumbratio::sketch::DdSketch;
+
+    // Log-uniform values over [1, 1e6]: the regime where relative (not
+    // absolute) error is the meaningful metric.
+    let alpha = 0.02_f64;
+    let n = 100_000_usize;
+    let mut rng = XorShift64::new(7);
+    let mut values = Vec::with_capacity(n);
+    let mut sketch = DdSketch::new(alpha);
+    for _ in 0..n {
+        let log_value = rng.next_u64() as f64 / u64::MAX as f64 * 6.0;
+        let value = 10_f64.powf(log_value);
+        sketch.insert_item(&value);
+        values.push(value);
+    }
+    values.sort_by(f64::total_cmp);
+
+    // For every percentile, the estimate must be within (1 +/- alpha) of
+    // the true value — the paper's guarantee. Allow a small slack for the
+    // bucket-mean readout and floating-point edges.
+    for qi in 1..100 {
+        let q = qi as f64 / 100.0;
+        let estimate = sketch.quantile(q).unwrap();
+        let truth = values[(q * (n - 1) as f64) as usize];
+        let ratio = estimate / truth;
+        assert!(
+            (1.0 - 1.1 * alpha..=1.0 + 1.1 * alpha).contains(&ratio),
+            "q = {q}: estimate {estimate} vs truth {truth} (ratio {ratio})"
+        );
+    }
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;
