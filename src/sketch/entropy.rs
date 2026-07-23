@@ -263,17 +263,19 @@ mod tests {
         let mut left = EntropySampler::with_seed(256, 1);
         let mut right = EntropySampler::with_seed(256, 1);
         let mut whole = EntropySampler::with_seed(256, 1);
-        let mut counts = std::collections::HashMap::new();
+        let mut counts = alloc::collections::BTreeMap::new();
         for i in 0..2_000_u64 {
             left.insert_item(&i);
             whole.insert_item(&i);
-            *counts.entry(crate::hash::hash_one(&crate::hash::DefaultBuildHasher::new(1), &i))
+            *counts
+                .entry(crate::hash::hash_one(&crate::hash::DefaultBuildHasher::new(1), &i))
                 .or_insert(0) += 1;
         }
         for i in 2_000..4_000_u64 {
             right.insert_item(&i);
             whole.insert_item(&i);
-            *counts.entry(crate::hash::hash_one(&crate::hash::DefaultBuildHasher::new(1), &i))
+            *counts
+                .entry(crate::hash::hash_one(&crate::hash::DefaultBuildHasher::new(1), &i))
                 .or_insert(0) += 1;
         }
 
