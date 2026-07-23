@@ -35,6 +35,16 @@ use crate::traits::{Insert, Merge, Sketch};
 /// also the conceptual parent of Count Sketch — same signed counters, a
 /// different read-out.
 ///
+/// # Rényi entropy
+///
+/// `F2` directly yields the order-2 Rényi entropy of the stream's
+/// distribution: `H2 = -log2(F2 / N^2)`. It is exact for the uniform
+/// distribution (`log2(n)` for `n` distinct single items) and tracks
+/// Shannon entropy closely for detection-style metrics (`H2 <= H_shannon`
+/// always). Multiplicative Shannon-entropy estimation in small space is a
+/// research problem of its own and deliberately out of scope here; see the
+/// composition note on [`Self::renyi2_entropy`].
+///
 /// # References
 ///
 /// - Noga Alon, Yossi Matias, and Mario Szegedy, "The Space Complexity of
@@ -46,6 +56,7 @@ pub struct AmsSketch<S = DefaultBuildHasher> {
     counters: Box<[i64]>,
     groups: usize,
     width: usize,
+    total: u64,
     seed_fingerprint: u64,
     hasher: S,
 }
@@ -123,6 +134,7 @@ impl<S> AmsSketch<S> {
             counters: vec![0; groups * width].into_boxed_slice(),
             groups,
             width,
+            total: 0,
             seed_fingerprint,
             hasher,
         }
@@ -136,6 +148,11 @@ impl<S> AmsSketch<S> {
     /// Returns the number of counters per group.
     pub const fn width(&self) -> usize {
         self.width
+    }
+
+    /// Returns the total number of inserted events.
+    pub const fn total_count(&self) -> u64 {
+        self.total
     }
 
     /// Returns the seed fingerprint used by merge compatibility checks.
@@ -153,9 +170,10 @@ impl<S> AmsSketch<S> {
         self.counters.len() * size_of::<i64>()
     }
 
-    /// Clears all counters.
+    /// Clears all counters and the total count.
     pub fn clear(&mut self) {
         self.counters.fill(0);
+        self.total = 0;
     }
 
     /// Returns the group means of squared counters, used by [`Self::f2`].
@@ -193,6 +211,7 @@ where
                 *counter += ((mixed >> bit & 1) as i64) * 2 - 1;
             }
         }
+        self.total = self.total.saturating_add(1);
     }
 
     /// Estimates `F2 = sum(f_i^2)`, the self-join size of the stream.
@@ -208,6 +227,28 @@ where
     #[cfg(any(feature = "std", feature = "libm"))]
     pub fn l2_norm(&self) -> f64 {
         float::sqrt(self.f2())
+    }
+
+    /// Estimates the order-2 Rényi entropy of the stream's frequency
+    /// distribution, `H2 = -log2(F2 / N^2)` bits.
+    ///
+    /// Exact for the uniform distribution (`log2(n)` for `n` distinct
+    /// single items). For Shannon entropy specifically: `H2 <= H_shannon`,
+    /// and the two track closely on detection-style workloads — a common
+    /// composition is to report `H2` plus heavy-hitter estimates from
+    /// [`crate::sketch::TopK`] when a Shannon reading is needed. First-class
+    /// multiplicative Shannon estimation in small space (Guha–McGregor–
+    /// Venkat-style sketches) is deliberately out of scope. Returns 0.0 for
+    /// an empty sketch.
+    ///
+    /// Available with the `std` or `libm` feature.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    pub fn renyi2_entropy(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        let ln2 = core::f64::consts::LN_2;
+        (2.0 * float::ln(self.total as f64) - float::ln(self.f2())) / ln2
     }
 }
 
@@ -251,6 +292,7 @@ impl<S> Merge for AmsSketch<S> {
         for (left, right) in self.counters.iter_mut().zip(other.counters.iter()) {
             *left += right;
         }
+        self.total = self.total.saturating_add(other.total);
         Ok(())
     }
 }
@@ -280,6 +322,49 @@ mod tests {
         }
         assert_eq!(sketch.f2(), 2_500.0);
         assert_eq!(sketch.l2_norm(), 50.0);
+    }
+
+    #[test]
+    fn renyi2_matches_uniform_within_estimator_noise() {
+        // n distinct items once each: true F2 = n, so true H2 = log2(n) —
+        // the Rényi-2 ceiling. The AMS estimate is unbiased but noisy, so
+        // the check is a bound, not equality.
+        let mut sketch = AmsSketch::new(4, 64);
+        for i in 0..1_000_u64 {
+            sketch.insert_item(&i);
+        }
+        assert_eq!(sketch.total_count(), 1_000);
+        let entropy = sketch.renyi2_entropy();
+        let expected = (1_000_f64).log2();
+        assert!(
+            (entropy - expected).abs() <= 1.0,
+            "H2 {entropy} vs true {expected}"
+        );
+    }
+
+    #[test]
+    fn renyi2_is_zero_for_empty_and_degenerate_streams() {
+        let mut sketch = AmsSketch::new(4, 64);
+        assert_eq!(sketch.renyi2_entropy(), 0.0);
+        for _ in 0..100 {
+            sketch.insert_item(&"same");
+        }
+        // One outcome: F2 = N^2, H2 = 0.
+        assert_eq!(sketch.renyi2_entropy(), 0.0);
+        sketch.clear();
+        assert_eq!(sketch.total_count(), 0);
+        assert_eq!(sketch.renyi2_entropy(), 0.0);
+    }
+
+    #[test]
+    fn merge_adds_totals() {
+        let mut left = AmsSketch::with_seed(3, 32, 5);
+        let mut right = AmsSketch::with_seed(3, 32, 5);
+        left.insert_item(&1_u64);
+        right.insert_item(&2_u64);
+        right.insert_item(&2_u64);
+        left.merge_from(&right).unwrap();
+        assert_eq!(left.total_count(), 3);
     }
 
     #[test]

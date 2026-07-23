@@ -977,6 +977,31 @@ fn top_k_over_count_sketch_recovers_heavy_hitters_on_zipf_stream() {
 }
 
 #[test]
+fn ams_renyi2_entropy_tracks_truth_on_zipf_stream() {
+    use adumbratio::sketch::AmsSketch;
+
+    let counts = zipf_counts(1_000, 100_000, 11);
+    let n = 100_000_f64;
+    let f2: f64 = counts.iter().map(|&c| (c as f64) * (c as f64)).sum();
+    let truth = -(f2 / (n * n)).log2();
+
+    let mut sketch = AmsSketch::with_error_and_seed(0.2, 0.01, 5);
+    for (item, &count) in counts.iter().enumerate() {
+        for _ in 0..count {
+            sketch.insert_item(&(item as u64));
+        }
+    }
+    let estimate = sketch.renyi2_entropy();
+    // F2 relative error of a few percent maps to a small absolute error in
+    // entropy bits; 0.5 bits is a generous seeded bound.
+    assert!(
+        (estimate - truth).abs() <= 0.5,
+        "H2 estimate {estimate} vs truth {truth}"
+    );
+    assert_eq!(sketch.total_count(), 100_000);
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;
