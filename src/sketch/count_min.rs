@@ -317,14 +317,17 @@ where
         self.insert_count(item, 1);
     }
 
-    /// Inserts `item` with weight `count` using the byte-weighted
-    /// conservative update rule of Estan–Varghese: only cells equal to the
-    /// current minimum increase, by the full `count`.
+    /// Inserts `item` with weight `count` using the conservative update
+    /// rule generalized to weights: every cell rises to at least
+    /// `minimum + count`. Cells exactly at the minimum gain the full
+    /// weight (the classic rule); cells above it rise too when `count`
+    /// exceeds their lead, which is what keeps the never-underestimates
+    /// guarantee true for weights above 1. At `count = 1` this reduces to
+    /// the classic conservative update.
     ///
-    /// Note this is *not* equivalent to calling [`Self::insert_item`]
-    /// `count` times (that would raise the minimum only once per item);
-    /// weighted inserts add the whole weight in one step, which is the
-    /// semantics packet/byte counters want.
+    /// Note the naive alternative — adding the whole weight only to cells
+    /// at the minimum — can underestimate whenever `count` exceeds a
+    /// cell's lead over the minimum, so it is deliberately not used.
     pub fn insert_count<T>(&mut self, item: &T, count: u64)
     where
         T: Hash + ?Sized,
@@ -337,14 +340,12 @@ where
             .map(|(row, &index)| self.rows.row(row).get(index))
             .min()
             .unwrap_or(0);
+        let target = minimum.saturating_add(count).min(PackedArray::<BITS>::MAX);
 
         for (row, index) in indices.into_iter().enumerate() {
             let current = self.rows.row(row).get(index);
-            if current == minimum {
-                self.rows.row_mut(row).set(
-                    index,
-                    current.saturating_add(count).min(PackedArray::<BITS>::MAX),
-                );
+            if current < target {
+                self.rows.row_mut(row).set(index, target);
             }
         }
         self.total_count = self.total_count.saturating_add(count);
