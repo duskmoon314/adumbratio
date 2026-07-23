@@ -124,10 +124,12 @@ impl BlockedBloomFilter<DefaultBuildHasher> {
         false_positive_rate: f64,
         seed: u64,
     ) -> Self {
-        Self::from_geometry(
+        let mut filter = Self::from_geometry(
             BloomGeometry::for_capacity(expected_items, false_positive_rate),
             seed,
-        )
+        );
+        filter.inner.mark_capacity(expected_items);
+        filter
     }
 }
 
@@ -150,6 +152,24 @@ impl<S> BlockedBloomFilter<S> {
     /// Returns the fraction of bits currently set.
     pub fn fill_ratio(&self) -> f64 {
         self.inner.fill_ratio()
+    }
+
+    /// Returns the exact number of insert events (not distinct items —
+    /// duplicates count separately).
+    pub const fn inserted_count(&self) -> u64 {
+        self.inner.inserted_count()
+    }
+
+    /// Returns the item count the filter was sized for by `with_capacity*`,
+    /// or `None` when built from explicit geometry.
+    pub const fn capacity(&self) -> Option<u64> {
+        self.inner.capacity()
+    }
+
+    /// Returns the fraction of the declared capacity used by insert events,
+    /// or `None` when no capacity was declared.
+    pub fn estimated_fill(&self) -> Option<f64> {
+        self.inner.estimated_fill()
     }
 
     /// Estimates the number of inserted distinct items from the fill ratio.
@@ -265,6 +285,17 @@ mod tests {
     use crate::error::MergeError;
     use crate::sketch::BloomGeometry;
     use crate::traits::{Contains, Insert, Merge};
+
+    #[test]
+    fn blocked_capacity_delegates() {
+        let mut filter = BlockedBloomFilter::with_capacity(500, 0.01);
+        assert_eq!(filter.capacity(), Some(500));
+        for i in 0..100_u64 {
+            filter.insert_item(&i);
+        }
+        assert_eq!(filter.inserted_count(), 100);
+        assert_eq!(filter.estimated_fill(), Some(0.2));
+    }
 
     #[test]
     fn inserted_items_have_no_false_negatives() {

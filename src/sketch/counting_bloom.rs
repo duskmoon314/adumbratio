@@ -62,6 +62,8 @@ pub struct CountingBloomFilter<
     hasher: S,
     scheme: I,
     policy: P,
+    inserted: u64,
+    expected_items: u64,
 }
 
 impl CountingBloomFilter<4, DefaultBuildHasher, DoubleHashing, Saturating> {
@@ -108,10 +110,12 @@ impl CountingBloomFilter<4, DefaultBuildHasher, DoubleHashing, Saturating> {
         false_positive_rate: f64,
         seed: u64,
     ) -> Self {
-        Self::from_geometry(
+        let mut filter = Self::from_geometry(
             BloomGeometry::for_capacity(expected_items, false_positive_rate),
             seed,
-        )
+        );
+        filter.expected_items = expected_items;
+        filter
     }
 }
 
@@ -137,6 +141,8 @@ impl<const BITS: u32, S, I, P> CountingBloomFilter<BITS, S, I, P> {
             hasher,
             scheme,
             policy,
+            inserted: 0,
+            expected_items: 0,
         }
     }
 
@@ -148,6 +154,31 @@ impl<const BITS: u32, S, I, P> CountingBloomFilter<BITS, S, I, P> {
     /// Returns the seed fingerprint used by merge compatibility checks.
     pub const fn seed_fingerprint(&self) -> u64 {
         self.seed_fingerprint
+    }
+
+    /// Returns the exact number of insert events (not distinct items —
+    /// duplicates count separately).
+    pub const fn inserted_count(&self) -> u64 {
+        self.inserted
+    }
+
+    /// Returns the item count the filter was sized for by `with_capacity*`,
+    /// or `None` when built from explicit geometry.
+    pub const fn capacity(&self) -> Option<u64> {
+        if self.expected_items > 0 {
+            Some(self.expected_items)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the fraction of the declared capacity used by insert events
+    /// (`inserted_count / capacity`), or `None` when no capacity was
+    /// declared. Consumers use this for bounded admission instead of
+    /// tracking inserts themselves.
+    pub fn estimated_fill(&self) -> Option<f64> {
+        self.capacity()
+            .map(|capacity| self.inserted as f64 / capacity as f64)
     }
 
     /// Returns the fraction of counters that are non-zero.
@@ -190,9 +221,10 @@ impl<const BITS: u32, S, I, P> CountingBloomFilter<BITS, S, I, P> {
         self.counters.storage_bytes()
     }
 
-    /// Clears every counter.
+    /// Clears every counter and the insert counter.
     pub fn clear(&mut self) {
         self.counters.clear();
+        self.inserted = 0;
     }
 
     fn nonzero_counters(&self) -> usize {
@@ -223,6 +255,7 @@ where
                 .increment(self.counters.get(index), PackedArray::<BITS>::MAX, 1);
             self.counters.set(index, next);
         }
+        self.inserted += 1;
     }
 
     /// Returns whether `item` may be present.
@@ -348,6 +381,7 @@ where
         self.counters.merge_with(&other.counters, |a, b| {
             self.policy.merge(a, b, PackedArray::<BITS>::MAX)
         });
+        self.inserted = self.inserted.saturating_add(other.inserted);
         Ok(())
     }
 }
@@ -367,6 +401,19 @@ mod tests {
         assert!(filter.remove_item("alice"));
         assert!(!filter.contains_item("alice"));
         assert!(!filter.remove_item("alice"));
+    }
+
+    #[test]
+    fn capacity_tracking_reports_fill() {
+        let mut filter = CountingBloomFilter::with_capacity(200, 0.01);
+        assert_eq!(filter.capacity(), Some(200));
+        for i in 0..100_u64 {
+            filter.insert_item(&i);
+        }
+        assert_eq!(filter.inserted_count(), 100);
+        assert_eq!(filter.estimated_fill(), Some(0.5));
+        filter.clear();
+        assert_eq!(filter.estimated_fill(), Some(0.0));
     }
 
     #[test]

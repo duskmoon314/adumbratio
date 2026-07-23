@@ -62,6 +62,8 @@ pub struct BloomFilter<S = DefaultBuildHasher, I = DoubleHashing> {
     seed_fingerprint: u64,
     hasher: S,
     scheme: I,
+    inserted: u64,
+    expected_items: u64,
 }
 
 impl BloomFilter<DefaultBuildHasher, DoubleHashing> {
@@ -106,7 +108,9 @@ impl BloomFilter<DefaultBuildHasher, DoubleHashing> {
         seed: u64,
     ) -> Self {
         let geometry = BloomGeometry::for_capacity(expected_items, false_positive_rate);
-        Self::from_geometry(geometry, seed)
+        let mut filter = Self::from_geometry(geometry, seed);
+        filter.mark_capacity(expected_items);
+        filter
     }
 }
 
@@ -132,12 +136,39 @@ impl<S, I> BloomFilter<S, I> {
             seed_fingerprint,
             hasher,
             scheme,
+            inserted: 0,
+            expected_items: 0,
         }
     }
 
     /// Returns the realized geometry.
     pub const fn geometry(&self) -> BloomGeometry {
         self.geometry
+    }
+
+    /// Returns the exact number of insert events (not distinct items —
+    /// duplicates count separately).
+    pub const fn inserted_count(&self) -> u64 {
+        self.inserted
+    }
+
+    /// Returns the item count the filter was sized for by `with_capacity*`,
+    /// or `None` when built from explicit geometry.
+    pub const fn capacity(&self) -> Option<u64> {
+        if self.expected_items > 0 {
+            Some(self.expected_items)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the fraction of the declared capacity used by insert events
+    /// (`inserted_count / capacity`), or `None` when no capacity was
+    /// declared. Consumers use this for bounded admission instead of
+    /// tracking inserts themselves.
+    pub fn estimated_fill(&self) -> Option<f64> {
+        self.capacity()
+            .map(|capacity| self.inserted as f64 / capacity as f64)
     }
 
     /// Returns the seed fingerprint used by merge compatibility checks.
@@ -191,9 +222,17 @@ impl<S, I> BloomFilter<S, I> {
         self.bits.storage_bytes()
     }
 
-    /// Clears all bits.
+    /// Clears all bits and the insert counter.
     pub fn clear(&mut self) {
         self.bits.clear();
+        self.inserted = 0;
+    }
+
+    /// Records the declared capacity for [`Self::capacity`] and
+    /// [`Self::estimated_fill`] (used by capacity-solving constructors).
+    #[cfg(any(feature = "std", feature = "libm"))]
+    pub(crate) fn mark_capacity(&mut self, expected_items: u64) {
+        self.expected_items = expected_items;
     }
 }
 
@@ -214,6 +253,7 @@ where
         {
             self.bits.set(index);
         }
+        self.inserted += 1;
     }
 
     /// Returns whether `item` may be present.
@@ -348,6 +388,7 @@ impl<S, I> Merge for BloomFilter<S, I> {
         }
 
         self.bits.union_with(&other.bits);
+        self.inserted = self.inserted.saturating_add(other.inserted);
         Ok(())
     }
 }
@@ -409,6 +450,35 @@ mod tests {
         for i in 0..1_000_u64 {
             assert!(filter.contains_item(&i), "missing inserted item {i}");
         }
+    }
+
+    #[test]
+    fn capacity_tracking_reports_fill_and_resets_on_clear() {
+        let mut filter = BloomFilter::with_capacity(1_000, 0.01);
+        assert_eq!(filter.capacity(), Some(1_000));
+        assert_eq!(filter.inserted_count(), 0);
+        assert_eq!(filter.estimated_fill(), Some(0.0));
+
+        for i in 0..250_u64 {
+            filter.insert_item(&i);
+        }
+        assert_eq!(filter.inserted_count(), 250);
+        assert_eq!(filter.estimated_fill(), Some(0.25));
+
+        filter.clear();
+        assert_eq!(filter.inserted_count(), 0);
+        assert_eq!(filter.estimated_fill(), Some(0.0));
+        assert_eq!(filter.capacity(), Some(1_000));
+
+        let geometry_only = BloomFilter::from_geometry(
+            BloomGeometry {
+                bits: 1_024,
+                hashes: 3,
+            },
+            0,
+        );
+        assert_eq!(geometry_only.capacity(), None);
+        assert_eq!(geometry_only.estimated_fill(), None);
     }
 
     #[test]
