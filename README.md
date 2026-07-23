@@ -1,11 +1,15 @@
 # adumbratio
 
-> **Status: Stage 3 + part of stage 4 implemented.** Storage blocks, hashing
-> blocks, policies, capability traits, Bloom, Counting Bloom, Count-Min,
-> Count Sketch, Cuckoo filter, and Blocked Bloom are working and tested —
-> including a seeded statistical suite that validates the error bounds from
-> the papers. `no_std` and `serde` are still pending. See
-> [DESIGN.md](DESIGN.md) for the full architecture.
+> **Status: actively developed.** All roadmap sketches are implemented and
+> validated against their papers' guarantees by a seeded statistical suite
+> (plus paper-reproduction examples and benchmarks): Bloom, Counting Bloom,
+> Blocked Bloom, Count-Min (+ conservative update), Count Sketch, Cuckoo
+> (+ semi-sorted variant), Quotient, xor and binary fuse filters,
+> HyperLogLog (+ sparse mode), MinHash (+ b-bit), SimHash, AMS, Misra–Gries,
+> Space-Saving, TopK (Count-Min or Count Sketch backend), KLL, DDSketch,
+> theta sketch, and IBLT. `serde` and `no_std` (+`alloc`, optional `libm`)
+> are supported; the crate forbids `unsafe` and has zero mandatory
+> dependencies. See [DESIGN.md](DESIGN.md) for the architecture.
 
 Composable building blocks for probabilistic data structures ("sketches") in
 Rust — plus the classical sketches assembled from them.
@@ -23,8 +27,14 @@ sketch = storage layout × index derivation × update policy
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ sketches   Bloom · CountingBloom · BlockedBloom · CountMin ·     │
-│            CountSketch · Cuckoo · …                              │
+│ sketches   membership: Bloom · CountingBloom · BlockedBloom ·    │
+│            Cuckoo · SemiSortedCuckoo · Quotient · Xor ·          │
+│            BinaryFuse                                            │
+│            frequency: CountMin(±CU) · CountSketch · AMS ·        │
+│            MisraGries · SpaceSaving · TopK                       │
+│            cardinality: HyperLogLog(+sparse) · Theta             │
+│            similarity: MinHash · BBitMinHash · SimHash           │
+│            quantiles: KLL · DDSketch      sets: IBLT             │
 ├──────────────────────────────────────────────────────────────────┤
 │ policies   Saturating · Checked · ConservativeUpdate · KickLoop  │
 ├──────────────────────────────────────────────────────────────────┤
@@ -63,17 +73,14 @@ blocks when a workload needs a custom composition.
 | b-bit MinHash | set similarity, 8× smaller signatures | low-b bits of minima + collision correction | ✅ 8 |
 | DDSketch | quantiles with relative error ±α | logarithmic buckets, count-per-bucket | ✅ 8 |
 
-## Planned sketches
-
-| Sketch | Answers | Stage |
-|---|---|---|
-| semi-sorted cuckoo variant, IBLT, HLL sparse mode | smaller cuckoo, set reconciliation, memory-frugal cardinality | 8 |
-
 Each sketch's doc comments cite the paper it reproduces (with DOI links),
 and the integration tests in `tests/` validate the paper's guarantees
 empirically: false-positive rates against the analytical bound, frequency
 error within `ε·N`, no false negatives under deletion workloads, and merge
 algebra.
+
+Future candidates: ribbon filter, HyperMinHash, t-digest. See
+[DESIGN.md](DESIGN.md) for the roadmap.
 
 ## Usage
 
@@ -144,6 +151,26 @@ let mut counters = PackedArray::<4>::new(16);
 counters.set(3, 15);
 assert_eq!(counters.get(3), 15);
 ```
+
+## Adversarial inputs
+
+The default `StableHasher` is deterministic and platform-stable — exactly
+what `merge` and `serde` need — but it is **not** a defense against
+hash-flooding. If you hash attacker-controlled keys (source IPs, domains),
+an adversary who learns the seed can manufacture collisions and degrade
+every probabilistic guarantee. Recommended production setups:
+
+- **Random seed per boot or tenant.** Every `from_geometry(geometry, seed)`
+  and `with_*_and_seed` constructor takes an explicit `u64` seed. Two
+  sketches merge only when seeds match (checked via seed fingerprints), and
+  a seed change means rebuilding the sketch — seeds are cheap, but they are
+  part of your compatibility story.
+- **Swap the hasher.** The `from_parts(geometry, seed_fingerprint, hasher)`
+  constructors accept any `BuildHasher` (std's `RandomState`, or a keyed
+  external hasher). The sketch logic is hasher-agnostic; what changes is
+  determinism — a non-stable hasher breaks merge and serialization
+  round-trips across runs, so pick stability or DoS-resistance per
+  deployment.
 
 ## Examples: reproducing the papers
 

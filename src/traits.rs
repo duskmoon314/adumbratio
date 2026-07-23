@@ -1,6 +1,20 @@
 //! Capability traits shared by sketches.
 
 /// Common lifecycle and storage introspection for sketches.
+///
+/// Lifecycle notes for stream-processing consumers:
+///
+/// - [`Sketch::clear`] empties the sketch but keeps its allocation and
+///   geometry (it is the "reset" of windowed pipelines — reuse the same
+///   object for the next window).
+/// - Merging is safe only between sketches with identical geometry *and*
+///   seed: implementations compare a stored seed fingerprint and report
+///   [`crate::error::MergeError::SeedMismatch`] (or
+///   [`crate::error::MergeError::GeometryMismatch`]) instead of silently
+///   corrupting answers.
+/// - Geometry accessors (`geometry()`, `storage_bytes()`, and friends)
+///   report the realized parameters, so a cleared sketch is cheap to
+///   re-validate or rebuild identically.
 pub trait Sketch {
     /// Clears all sketch state while retaining its allocation and geometry.
     fn clear(&mut self);
