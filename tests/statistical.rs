@@ -1048,6 +1048,39 @@ fn entropy_sampler_tracks_shannon_on_zipf_stream() {
 }
 
 #[test]
+fn top_k_weighted_recovers_byte_volume_heavy_hitters() {
+    use adumbratio::sketch::TopK;
+
+    // Byte-weighted stream: per-packet byte sizes on a zipf item
+    // distribution; heavy hitters are ranked by byte volume, not packets.
+    let mut rng = XorShift64::new(23);
+    let mut top = TopK::new(20, 0.001, 0.01);
+    let mut truth = vec![0_u64; 1_000];
+    for _ in 0..50_000 {
+        let item = rng.next_index(1_000) as u64;
+        let bytes = 1 + rng.next_index(1500) as u64;
+        truth[item as usize] += bytes;
+        top.insert_count(&item, bytes);
+    }
+
+    let mut order: Vec<usize> = (0..truth.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(truth[i]));
+    let true_top: std::collections::HashSet<u64> =
+        order.iter().take(20).map(|&i| i as u64).collect();
+
+    let reported = top.top_k();
+    assert_eq!(reported.len(), 20);
+    let hits = reported
+        .iter()
+        .filter(|(item, _)| true_top.contains(item))
+        .count();
+    assert!(
+        hits >= 19,
+        "weighted recall@20 = {hits}/20 on a byte-weighted stream"
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

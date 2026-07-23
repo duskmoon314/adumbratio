@@ -238,9 +238,19 @@ where
     where
         T: Clone,
     {
+        self.insert_count(item, 1);
+    }
+
+    /// Inserts `item` with weight `count` (byte-weighted flow tracking)
+    /// and maintains the candidate set by weighted estimates.
+    #[cfg(feature = "std")]
+    pub fn insert_count(&mut self, item: &T, count: u64)
+    where
+        T: Clone,
+    {
         use std::cmp::Reverse;
 
-        Estimator::insert_count(&mut self.sketch, item, 1);
+        Estimator::insert_count(&mut self.sketch, item, count);
 
         if let Some(&slot) = self.index.get(item) {
             let estimate = Estimator::estimate(&self.sketch, item);
@@ -287,7 +297,17 @@ where
     where
         T: Clone,
     {
-        Estimator::insert_count(&mut self.sketch, item, 1);
+        self.insert_count(item, 1);
+    }
+
+    /// Inserts `item` with weight `count` and maintains the candidate set
+    /// (`no_std` fallback: `O(k)` linear scan).
+    #[cfg(not(feature = "std"))]
+    pub fn insert_count(&mut self, item: &T, count: u64)
+    where
+        T: Clone,
+    {
+        Estimator::insert_count(&mut self.sketch, item, count);
 
         if self.candidates.iter().any(|candidate| candidate == item) {
             return;
@@ -514,6 +534,23 @@ mod tests {
         }
         assert!(top.estimate_item(&0_u64) >= 9_000);
         assert_eq!(top.total_count(), top.sketch().total_count());
+    }
+
+    #[test]
+    fn weighted_inserts_track_byte_heavy_flows() {
+        // The elephant-vs-mice case the downstream consumer needs: a flow
+        // seen once with 1500 bytes must outrank flows seen many times with
+        // unit weight.
+        let mut top = TopK::new(3, 0.001, 0.01);
+        for i in 0..50_u64 {
+            top.insert_item(&i);
+        }
+        top.insert_count(&100_u64, 1500);
+
+        let ranked = top.top_k();
+        assert_eq!(ranked[0].0, 100);
+        assert!(ranked[0].1 >= 1500);
+        assert!(ranked.iter().all(|(item, _)| *item == 100 || *item < 50));
     }
 
     #[test]
