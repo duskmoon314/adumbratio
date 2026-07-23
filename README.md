@@ -1,5 +1,12 @@
 # adumbratio
 
+> **Note:** This crate is developed with heavy LLM assistance. The
+> implementation, tests, and documentation are substantially
+> machine-generated (with human review), so **use at your own risk** — run
+> the statistical suite (`cargo test`) and the paper-reproduction examples
+> (`examples/`) against your own workloads before trusting it in
+> production.
+
 > **Status: actively developed.** All roadmap sketches are implemented and
 > validated against their papers' guarantees by a seeded statistical suite
 > (plus paper-reproduction examples and benchmarks): Bloom, Counting Bloom,
