@@ -6,7 +6,9 @@ use core::hash::{BuildHasher, Hash};
 use alloc::vec::Vec;
 
 use crate::error::MergeError;
-use crate::sketch::{CountMinSketch, CountSketch};
+use crate::sketch::CountMinSketch;
+#[cfg(any(feature = "std", feature = "libm"))]
+use crate::sketch::CountSketch;
 use crate::traits::{Estimator, Insert, Merge, Sketch};
 
 /// A heavy-hitters companion that tracks the top-`k` items over a
