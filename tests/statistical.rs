@@ -948,6 +948,35 @@ fn count_min_weighted_insert_never_underestimates_weighted_truth() {
 }
 
 #[test]
+fn top_k_over_count_sketch_recovers_heavy_hitters_on_zipf_stream() {
+    use adumbratio::sketch::TopK;
+
+    let counts = zipf_counts(10_000, 200_000, 11);
+    let mut top = TopK::<u64>::with_count_sketch(20, 0.001, 0.01);
+    for (item, &count) in counts.iter().enumerate() {
+        for _ in 0..count {
+            top.insert_item(&(item as u64));
+        }
+    }
+
+    let mut order: Vec<usize> = (0..counts.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(counts[i]));
+    let true_top: std::collections::HashSet<u64> =
+        order.iter().take(20).map(|&i| i as u64).collect();
+
+    let reported = top.top_k();
+    assert_eq!(reported.len(), 20);
+    let hits = reported
+        .iter()
+        .filter(|(item, _)| true_top.contains(item))
+        .count();
+    assert!(
+        hits >= 19,
+        "recall@20 = {hits}/20 over a CountSketch backend on a zipf stream"
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

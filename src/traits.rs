@@ -55,3 +55,21 @@ pub trait Merge: Sized {
     /// geometry and hash seeds.
     fn merge_from(&mut self, other: &Self) -> Result<(), crate::error::MergeError>;
 }
+
+/// Capability for frequency sketches that can back a top-k candidate set:
+/// point estimates and weighted inserts on top of the usual lifecycle and
+/// merge vocabulary.
+///
+/// Implemented by [`CountMinSketch`](crate::sketch::CountMinSketch) and
+/// [`CountSketch`](crate::sketch::CountSketch), which is what makes
+/// [`TopK`](crate::sketch::TopK) work over either backend.
+pub trait Estimator<T: ?Sized>: Sketch + Merge {
+    /// Estimates the frequency of `item`.
+    fn estimate(&self, item: &T) -> u64;
+
+    /// Inserts `item` with weight `count`.
+    fn insert_weighted(&mut self, item: &T, count: u64);
+
+    /// Returns the total number of inserted events (gross weighted volume).
+    fn total(&self) -> u64;
+}

@@ -266,6 +266,24 @@ impl CountSketchGeometry {
     }
 }
 
+impl<T, S> crate::traits::Estimator<T> for CountSketch<S>
+where
+    T: Hash + ?Sized,
+    S: BuildHasher,
+{
+    fn estimate(&self, item: &T) -> u64 {
+        self.estimate_item(item)
+    }
+
+    fn insert_weighted(&mut self, item: &T, count: u64) {
+        Self::insert_count(self, item, count);
+    }
+
+    fn total(&self) -> u64 {
+        self.total_count()
+    }
+}
+
 impl<S> Sketch for CountSketch<S> {
     fn clear(&mut self) {
         self.clear();

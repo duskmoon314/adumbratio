@@ -352,6 +352,43 @@ where
     }
 }
 
+impl<T, const BITS: u32, S> crate::traits::Estimator<T> for CountMinSketch<BITS, S, PlainUpdate>
+where
+    T: Hash + ?Sized,
+    S: BuildHasher,
+{
+    fn estimate(&self, item: &T) -> u64 {
+        self.estimate_item(item)
+    }
+
+    fn insert_weighted(&mut self, item: &T, count: u64) {
+        Self::insert_count(self, item, count);
+    }
+
+    fn total(&self) -> u64 {
+        self.total_count()
+    }
+}
+
+impl<T, const BITS: u32, S> crate::traits::Estimator<T>
+    for CountMinSketch<BITS, S, ConservativeUpdate>
+where
+    T: Hash + ?Sized,
+    S: BuildHasher,
+{
+    fn estimate(&self, item: &T) -> u64 {
+        self.estimate_item(item)
+    }
+
+    fn insert_weighted(&mut self, item: &T, count: u64) {
+        Self::insert_count(self, item, count);
+    }
+
+    fn total(&self) -> u64 {
+        self.total_count()
+    }
+}
+
 impl CountMinGeometry {
     /// Computes Count-Min geometry from target error parameters.
     ///

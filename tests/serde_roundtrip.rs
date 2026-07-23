@@ -283,6 +283,19 @@ fn iblt_round_trip_preserves_entries() {
 }
 
 #[test]
+fn top_k_count_sketch_round_trip_preserves_candidates() {
+    let mut top = TopK::<u64>::with_count_sketch(10, 0.001, 0.01);
+    for item in 0..100_u64 {
+        for _ in 0..(1000 / (item + 1)) {
+            top.insert_item(&item);
+        }
+    }
+    let restored: TopK<u64, _, adumbratio::sketch::CountSketch> = round_trip(&top);
+    assert_eq!(restored.top_k(), top.top_k());
+    assert_eq!(restored.total_count(), top.total_count());
+}
+
+#[test]
 fn cuckoo_round_trip_preserves_occupancy() {
     let mut filter = CuckooFilter::with_capacity_and_seed(10_000, 0.001, 9);
     for i in 0..8_000_u64 {

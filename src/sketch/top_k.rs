@@ -1,4 +1,4 @@
-//! Top-k heavy hitters over a Count-Min Sketch.
+//! Top-k heavy hitters over a frequency sketch.
 
 use core::convert::Infallible;
 use core::hash::{BuildHasher, Hash};
@@ -6,19 +6,20 @@ use core::hash::{BuildHasher, Hash};
 use alloc::vec::Vec;
 
 use crate::error::MergeError;
-use crate::sketch::CountMinSketch;
-use crate::traits::{Insert, Merge, Sketch};
+use crate::sketch::{CountMinSketch, CountSketch};
+use crate::traits::{Estimator, Insert, Merge, Sketch};
 
 /// A heavy-hitters companion that tracks the top-`k` items over a
-/// [`CountMinSketch`].
+/// frequency [`Estimator`] — a [`CountMinSketch`] (default) or a
+/// [`CountSketch`].
 ///
-/// Count-Min gives point estimates for any item but cannot enumerate the
-/// heavy ones. The standard companion structure keeps a small candidate set
-/// alongside the sketch: every inserted item updates the sketch, and the
-/// candidate set keeps the `k` distinct items with the largest estimates
-/// seen so far. Because Count-Min estimates grow monotonically, replacing
-/// the weakest candidate whenever a stronger one appears is enough to
-/// recover the true heavy hitters on skewed streams.
+/// Frequency sketches give point estimates for any item but cannot
+/// enumerate the heavy ones. The standard companion structure keeps a small
+/// candidate set alongside the sketch: every inserted item updates the
+/// sketch, and the candidate set keeps the `k` distinct items with the
+/// largest estimates seen so far. Because estimates grow monotonically,
+/// replacing the weakest candidate whenever a stronger one appears is
+/// enough to recover the true heavy hitters on skewed streams.
 ///
 /// ```text
 /// insert("x")
@@ -33,11 +34,8 @@ use crate::traits::{Insert, Merge, Sketch};
 /// top_k() = candidates sorted by their current estimates
 /// ```
 ///
-/// Candidate membership is checked by a linear scan, so one insert costs
-/// `O(k)` comparisons on top of the sketch update — fine for analytics
-/// companions, not for line-rate data planes. With `std`, a hash index plus
-/// a lazy versioned min-heap make inserts `O(log k)` instead; the `no_std`
-/// fallback keeps the linear scan.
+/// With `std`, a hash index plus a lazy versioned min-heap make inserts
+/// `O(log k)`; the `no_std` fallback keeps an `O(k)` linear scan.
 ///
 /// # References
 ///
@@ -46,19 +44,25 @@ use crate::traits::{Insert, Merge, Sketch};
 /// - Graham Cormode and S. Muthukrishnan, "An Improved Data Stream Summary:
 ///   The Count-Min Sketch and its Applications", Journal of Algorithms, 2005.
 ///   <https://doi.org/10.1016/j.jalgor.2003.12.001>
+/// - Moses Charikar, Kevin Chen, and Martin Farach-Colton, "Finding Frequent
+///   Items in Data Streams", Theoretical Computer Science, 2004.
+///   <https://doi.org/10.1016/j.tcs.2003.10.024>
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
     serde(bound(
-        serialize = "T: serde::Serialize + Eq + core::hash::Hash, S: serde::Serialize",
-        deserialize = "T: serde::Deserialize<'de> + Eq + core::hash::Hash, S: serde::Deserialize<'de>"
+        serialize = "T: serde::Serialize + Eq + core::hash::Hash, S: serde::Serialize, E: serde::Serialize",
+        deserialize = "T: serde::Deserialize<'de> + Eq + core::hash::Hash, S: serde::Deserialize<'de>, E: serde::Deserialize<'de>"
     ))
 )]
-pub struct TopK<T, S = crate::hash::DefaultBuildHasher> {
-    sketch: CountMinSketch<32, S>,
+pub struct TopK<T, S = crate::hash::DefaultBuildHasher, E = CountMinSketch<32, S>> {
+    sketch: E,
     candidates: Vec<T>,
     k: usize,
+    /// Anchors the hasher type parameter (only used through `E`'s default).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    marker: core::marker::PhantomData<S>,
     /// Maps candidate items to their slot in `candidates` (`std` fast path).
     #[cfg(feature = "std")]
     index: std::collections::HashMap<T, usize>,
@@ -73,8 +77,8 @@ pub struct TopK<T, S = crate::hash::DefaultBuildHasher> {
 }
 
 impl<T> TopK<T, crate::hash::DefaultBuildHasher> {
-    /// Creates a top-k tracker whose sketch is solved from `epsilon` and
-    /// `delta`, with seed zero.
+    /// Creates a top-k tracker whose Count-Min backend is solved from
+    /// `epsilon` and `delta`, with seed zero.
     ///
     /// Available with the `std` or `libm` feature.
     ///
@@ -87,7 +91,7 @@ impl<T> TopK<T, crate::hash::DefaultBuildHasher> {
         Self::with_seed(k, epsilon, delta, 0)
     }
 
-    /// Creates a top-k tracker with an explicit hash seed.
+    /// Creates a top-k tracker over Count-Min with an explicit hash seed.
     ///
     /// Available with the `std` or `libm` feature.
     ///
@@ -98,20 +102,58 @@ impl<T> TopK<T, crate::hash::DefaultBuildHasher> {
     pub fn with_seed(k: usize, epsilon: f64, delta: f64, seed: u64) -> Self {
         Self::from_sketch(k, CountMinSketch::with_error_and_seed(epsilon, delta, seed))
     }
+
+    /// Creates a top-k tracker backed by a **Count Sketch** solved from
+    /// `epsilon` and `delta`, with seed zero — for consumers whose window
+    /// state is already Count Sketch, or who want median-of-rows
+    /// (unbiased) heavy-hitter estimates.
+    ///
+    /// Available with the `std` or `libm` feature.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `k` is zero or if the error parameters are invalid.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    pub fn with_count_sketch(
+        k: usize,
+        epsilon: f64,
+        delta: f64,
+    ) -> TopK<T, crate::hash::DefaultBuildHasher, CountSketch> {
+        Self::with_count_sketch_and_seed(k, epsilon, delta, 0)
+    }
+
+    /// Creates a top-k tracker backed by a Count Sketch with an explicit
+    /// hash seed.
+    ///
+    /// Available with the `std` or `libm` feature.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `k` is zero or if the error parameters are invalid.
+    #[cfg(any(feature = "std", feature = "libm"))]
+    pub fn with_count_sketch_and_seed(
+        k: usize,
+        epsilon: f64,
+        delta: f64,
+        seed: u64,
+    ) -> TopK<T, crate::hash::DefaultBuildHasher, CountSketch> {
+        TopK::<T, _, CountSketch>::from_sketch(k, CountSketch::with_error_and_seed(epsilon, delta, seed))
+    }
 }
 
-impl<T, S> TopK<T, S> {
-    /// Creates a top-k tracker over an existing Count-Min Sketch.
+impl<T, S, E> TopK<T, S, E> {
+    /// Creates a top-k tracker over an existing frequency sketch.
     ///
     /// # Panics
     ///
     /// Panics if `k` is zero.
-    pub fn from_sketch(k: usize, sketch: CountMinSketch<32, S>) -> Self {
+    pub fn from_sketch(k: usize, sketch: E) -> Self {
         assert!(k > 0, "top-k tracking needs k >= 1");
         Self {
             sketch,
             candidates: Vec::new(),
             k,
+            marker: core::marker::PhantomData,
             #[cfg(feature = "std")]
             index: std::collections::HashMap::new(),
             #[cfg(feature = "std")]
@@ -127,7 +169,7 @@ impl<T, S> TopK<T, S> {
     }
 
     /// Returns the underlying sketch.
-    pub const fn sketch(&self) -> &CountMinSketch<32, S> {
+    pub const fn sketch(&self) -> &E {
         &self.sketch
     }
 
@@ -135,15 +177,20 @@ impl<T, S> TopK<T, S> {
     pub fn candidates(&self) -> &[T] {
         &self.candidates
     }
+}
 
+impl<T, S, E> TopK<T, S, E>
+where
+    E: Estimator<T>,
+{
     /// Returns the total number of inserted events.
-    pub const fn total_count(&self) -> u64 {
-        self.sketch.total_count()
+    pub fn total_count(&self) -> u64 {
+        Estimator::total(&self.sketch)
     }
 
     /// Clears the sketch and the candidate set.
     pub fn clear(&mut self) {
-        self.sketch.clear();
+        Sketch::clear(&mut self.sketch);
         self.candidates.clear();
         #[cfg(feature = "std")]
         {
@@ -155,14 +202,15 @@ impl<T, S> TopK<T, S> {
 
     /// Returns the byte length of the sketch storage (excluding candidates).
     pub fn storage_bytes(&self) -> usize {
-        self.sketch.storage_bytes()
+        Sketch::storage_bytes(&self.sketch)
     }
 }
 
-impl<T, S> TopK<T, S>
+impl<T, S, E> TopK<T, S, E>
 where
     T: Hash + Eq,
     S: BuildHasher,
+    E: Estimator<T>,
 {
     /// Returns the candidates with their current estimates, heaviest first.
     pub fn top_k(&self) -> Vec<(T, u64)>
@@ -173,7 +221,7 @@ where
             .candidates
             .iter()
             .map(|item| {
-                let estimate = self.sketch.estimate_item(item);
+                let estimate = Estimator::estimate(&self.sketch, item);
                 (item.clone(), estimate)
             })
             .collect();
@@ -190,17 +238,17 @@ where
     {
         use std::cmp::Reverse;
 
-        self.sketch.insert_item(item);
+        Estimator::insert_weighted(&mut self.sketch, item, 1);
 
         if let Some(&slot) = self.index.get(item) {
-            let estimate = self.sketch.estimate_item(item);
+            let estimate = Estimator::estimate(&self.sketch, item);
             self.versions[slot] += 1;
             self.heap.push(Reverse((estimate, self.versions[slot], slot)));
             return;
         }
         if self.candidates.len() < self.k {
             let slot = self.candidates.len();
-            let estimate = self.sketch.estimate_item(item);
+            let estimate = Estimator::estimate(&self.sketch, item);
             self.candidates.push(item.clone());
             self.index.insert(item.clone(), slot);
             self.versions.push(0);
@@ -216,7 +264,7 @@ where
                 break (estimate, slot);
             }
         };
-        let estimate = self.sketch.estimate_item(item);
+        let estimate = Estimator::estimate(&self.sketch, item);
         if estimate > min_estimate {
             self.index.remove(&self.candidates[victim]);
             self.index.insert(item.clone(), victim);
@@ -237,7 +285,7 @@ where
     where
         T: Clone,
     {
-        self.sketch.insert_item(item);
+        Estimator::insert_weighted(&mut self.sketch, item, 1);
 
         if self.candidates.iter().any(|candidate| candidate == item) {
             return;
@@ -254,21 +302,24 @@ where
             .candidates
             .iter()
             .enumerate()
-            .map(|(i, candidate)| (i, self.sketch.estimate_item(candidate)))
+            .map(|(i, candidate)| (i, Estimator::estimate(&self.sketch, candidate)))
             .min_by_key(|&(_, estimate)| estimate)
             .expect("candidate set is full and non-empty");
-        if self.sketch.estimate_item(item) > weakest_estimate {
+        if Estimator::estimate(&self.sketch, item) > weakest_estimate {
             self.candidates[weakest] = item.clone();
         }
     }
 
     /// Estimates the frequency of `item` from the underlying sketch.
     pub fn estimate_item(&self, item: &T) -> u64 {
-        self.sketch.estimate_item(item)
+        Estimator::estimate(&self.sketch, item)
     }
 }
 
-impl<T, S> Sketch for TopK<T, S> {
+impl<T, S, E> Sketch for TopK<T, S, E>
+where
+    E: Estimator<T>,
+{
     fn clear(&mut self) {
         self.clear();
     }
@@ -282,10 +333,11 @@ impl<T, S> Sketch for TopK<T, S> {
     }
 }
 
-impl<T, S> Insert<T> for TopK<T, S>
+impl<T, S, E> Insert<T> for TopK<T, S, E>
 where
     T: Hash + Eq + Clone,
     S: BuildHasher,
+    E: Estimator<T>,
 {
     type Err = Infallible;
 
@@ -295,10 +347,11 @@ where
     }
 }
 
-impl<T, S> Merge for TopK<T, S>
+impl<T, S, E> Merge for TopK<T, S, E>
 where
     T: Hash + Eq + Clone,
     S: BuildHasher,
+    E: Estimator<T>,
 {
     /// Merges the underlying sketches and re-selects the top-k candidates
     /// from the union of both candidate sets.
@@ -306,7 +359,7 @@ where
         if self.k != other.k {
             return Err(MergeError::GeometryMismatch);
         }
-        self.sketch.merge_from(&other.sketch)?;
+        Merge::merge_from(&mut self.sketch, &other.sketch)?;
 
         let union: Vec<T> = self
             .candidates
@@ -321,12 +374,9 @@ where
             });
         self.candidates = union;
         // Trim to the k strongest under the merged sketch.
-        self.candidates
-            .sort_by(|a, b| {
-                self.sketch
-                    .estimate_item(b)
-                    .cmp(&self.sketch.estimate_item(a))
-            });
+        self.candidates.sort_by(|a, b| {
+            Estimator::estimate(&self.sketch, b).cmp(&Estimator::estimate(&self.sketch, a))
+        });
         self.candidates.truncate(self.k);
 
         // Rebuild the fast-path index and heap from the new candidate set.
@@ -340,7 +390,7 @@ where
             for (slot, item) in self.candidates.iter().enumerate() {
                 self.index.insert(item.clone(), slot);
                 self.versions.push(0);
-                let estimate = self.sketch.estimate_item(item);
+                let estimate = Estimator::estimate(&self.sketch, item);
                 self.heap.push(Reverse((estimate, 0, slot)));
             }
         }
@@ -442,6 +492,26 @@ mod tests {
                 .count()
                 == 2
         );
+    }
+
+    #[test]
+    fn count_sketch_backend_recovers_heavy_items() {
+        let mut top = TopK::<u64>::with_count_sketch(10, 0.01, 0.01);
+        for item in skewed_stream() {
+            top.insert_item(&item);
+        }
+
+        let ranked = top.top_k();
+        assert_eq!(ranked.len(), 10);
+        assert_eq!(ranked[0].0, 0);
+        assert!(ranked[0].1 >= 9_000);
+        // Count Sketch is unbiased; heavy ranks come back in order on this
+        // strongly skewed stream.
+        for (rank, (item, _)) in ranked.iter().enumerate() {
+            assert_eq!(*item, rank as u64);
+        }
+        assert!(top.estimate_item(&0_u64) >= 9_000);
+        assert_eq!(top.total_count(), top.sketch().total_count());
     }
 
     #[test]
