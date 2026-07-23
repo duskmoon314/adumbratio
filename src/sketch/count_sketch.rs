@@ -160,14 +160,35 @@ where
     where
         T: Hash + ?Sized,
     {
+        self.insert_count(item, 1);
+    }
+
+    /// Inserts `item` with weight `count`: each addressed signed counter
+    /// changes by `sign * count`. For byte-weighted frequency estimation
+    /// instead of looping [`Self::insert_item`].
+    pub fn insert_count<T>(&mut self, item: &T, count: u64)
+    where
+        T: Hash + ?Sized,
+    {
+        self.insert_signed(item, count.min(i64::MAX as u64) as i64);
+    }
+
+    /// Inserts `item` with a signed weight: each addressed signed counter
+    /// changes by `sign * count`, so decrements are possible too. The
+    /// median-of-rows read-out stays meaningful under signed updates, which
+    /// is what distinguishes Count Sketch from Count-Min here.
+    pub fn insert_signed<T>(&mut self, item: &T, count: i64)
+    where
+        T: Hash + ?Sized,
+    {
         let hash = hash_one(&self.hasher, item);
         for row in 0..self.geometry.depth {
             let index = row_index(hash, row, self.geometry.width);
             let signed = decode(self.rows.row(row).get(index));
-            let next = signed.saturating_add(sign(hash, row));
+            let next = signed.saturating_add(sign(hash, row) * count);
             self.rows.row_mut(row).set(index, encode(next));
         }
-        self.total_count = self.total_count.saturating_add(1);
+        self.total_count = self.total_count.saturating_add(count.unsigned_abs());
     }
 
     /// Returns the signed Count Sketch estimate for `item`.
@@ -335,6 +356,23 @@ mod tests {
         let mut sketch = CountSketch::with_error(0.25, 0.01);
         Insert::<str>::insert(&mut sketch, "a").unwrap();
         assert!(sketch.estimate_item("a") > 0);
+    }
+
+    #[test]
+    fn weighted_and_signed_inserts_behave() {
+        let mut weighted = CountSketch::with_error(0.1, 0.01);
+        let mut iterated = CountSketch::with_error(0.1, 0.01);
+        weighted.insert_count("a", 9);
+        for _ in 0..9 {
+            iterated.insert_item("a");
+        }
+        assert_eq!(weighted.estimate_signed("a"), iterated.estimate_signed("a"));
+        assert_eq!(weighted.total_count(), 9);
+
+        // Signed inserts can decrement; gross volume still accumulates.
+        weighted.insert_signed("a", -4);
+        assert!(weighted.estimate_signed("a") <= 9);
+        assert_eq!(weighted.total_count(), 13);
     }
 
     #[test]

@@ -907,6 +907,47 @@ fn hyperloglog_sparse_mode_matches_dense_accuracy() {
 }
 
 #[test]
+fn count_min_weighted_insert_never_underestimates_weighted_truth() {
+    use adumbratio::sketch::CountMinSketch;
+
+    // Byte-weighted stream: item i arrives with per-packet byte sizes.
+    // The weighted guarantee is the same: estimates never underestimate
+    // the weighted frequency, and stay within eps * weighted_N.
+    let mut rng = XorShift64::new(23);
+    let mut sketch = CountMinSketch::with_error_and_seed(0.001, 0.01, 5);
+    let mut conservative = CountMinSketch::conservative_with_error_and_seed(0.001, 0.01, 5);
+    let mut truth = vec![0_u64; 1_000];
+    let mut weighted_n = 0_u64;
+    for _ in 0..50_000 {
+        let item = rng.next_index(1_000) as u64;
+        let bytes = 1 + rng.next_index(1500) as u64;
+        truth[item as usize] += bytes;
+        weighted_n += bytes;
+        sketch.insert_count(&item, bytes);
+        conservative.insert_count(&item, bytes);
+    }
+
+    let eps_n = (0.001 * weighted_n as f64) as u64;
+    let mut violations = 0_usize;
+    let mut conservative_violations = 0_usize;
+    for (item, &t) in truth.iter().enumerate() {
+        let estimate = sketch.estimate_item(&item);
+        assert!(estimate >= t, "plain underestimated {item}: {estimate} < {t}");
+        if estimate - t > eps_n {
+            violations += 1;
+        }
+        let estimate = conservative.estimate_item(&item);
+        assert!(estimate >= t, "CU underestimated {item}: {estimate} < {t}");
+        if estimate - t > eps_n {
+            conservative_violations += 1;
+        }
+    }
+    assert!(violations as f64 <= truth.len() as f64 * 0.05);
+    assert!(conservative_violations as f64 <= truth.len() as f64 * 0.05);
+    assert_eq!(sketch.total_count(), weighted_n);
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

@@ -281,16 +281,27 @@ where
     where
         T: Hash + ?Sized,
     {
+        self.insert_count(item, 1);
+    }
+
+    /// Inserts `item` with weight `count`: each addressed cell increases by
+    /// `count` (saturating). For byte-weighted frequency estimation — the
+    /// standard traffic-measurement use — instead of looping
+    /// [`Self::insert_item`].
+    pub fn insert_count<T>(&mut self, item: &T, count: u64)
+    where
+        T: Hash + ?Sized,
+    {
         let hash = hash_one(&self.hasher, item);
         let indices: Vec<_> = self.row_indices(hash).collect();
         for (row, index) in indices.into_iter().enumerate() {
             let current = self.rows.row(row).get(index);
             self.rows.row_mut(row).set(
                 index,
-                current.saturating_add(1).min(PackedArray::<BITS>::MAX),
+                current.saturating_add(count).min(PackedArray::<BITS>::MAX),
             );
         }
-        self.total_count = self.total_count.saturating_add(1);
+        self.total_count = self.total_count.saturating_add(count);
     }
 }
 
@@ -300,6 +311,21 @@ where
 {
     /// Inserts one occurrence of `item` with conservative update.
     pub fn insert_item<T>(&mut self, item: &T)
+    where
+        T: Hash + ?Sized,
+    {
+        self.insert_count(item, 1);
+    }
+
+    /// Inserts `item` with weight `count` using the byte-weighted
+    /// conservative update rule of Estan–Varghese: only cells equal to the
+    /// current minimum increase, by the full `count`.
+    ///
+    /// Note this is *not* equivalent to calling [`Self::insert_item`]
+    /// `count` times (that would raise the minimum only once per item);
+    /// weighted inserts add the whole weight in one step, which is the
+    /// semantics packet/byte counters want.
+    pub fn insert_count<T>(&mut self, item: &T, count: u64)
     where
         T: Hash + ?Sized,
     {
@@ -317,11 +343,11 @@ where
             if current == minimum {
                 self.rows.row_mut(row).set(
                     index,
-                    current.saturating_add(1).min(PackedArray::<BITS>::MAX),
+                    current.saturating_add(count).min(PackedArray::<BITS>::MAX),
                 );
             }
         }
-        self.total_count = self.total_count.saturating_add(1);
+        self.total_count = self.total_count.saturating_add(count);
     }
 }
 
@@ -491,6 +517,31 @@ mod tests {
         // And the guarantee is visibly broken: the estimate is below the
         // true count of 300.
         assert_eq!(sketch.estimate_item("hot"), 255);
+    }
+
+    #[test]
+    fn weighted_insert_matches_iterated_inserts_for_plain_update() {
+        let mut weighted = CountMinSketch::with_error(0.001, 0.01);
+        let mut iterated = CountMinSketch::with_error(0.001, 0.01);
+        weighted.insert_count("a", 7);
+        for _ in 0..7 {
+            iterated.insert_item("a");
+        }
+        assert_eq!(weighted.estimate_item("a"), iterated.estimate_item("a"));
+        assert_eq!(weighted.total_count(), 7);
+        assert_eq!(weighted.total_count(), iterated.total_count());
+    }
+
+    #[test]
+    fn conservative_weighted_insert_adds_weight_once() {
+        let mut sketch = CountMinSketch::conservative_with_error(0.001, 0.01);
+        sketch.insert_count("a", 5);
+        // Byte-weighted conservative update: min cells jump to min + 5 in
+        // one step (not min + 1 five times).
+        assert!(sketch.estimate_item("a") >= 5);
+        sketch.insert_count("a", 3);
+        assert!(sketch.estimate_item("a") >= 8);
+        assert_eq!(sketch.total_count(), 8);
     }
 
     #[test]
