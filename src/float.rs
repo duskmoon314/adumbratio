@@ -23,6 +23,7 @@ macro_rules! unary_shim {
 }
 
 unary_shim!(ln, ln, log);
+unary_shim!(log2, log2, log2);
 unary_shim!(exp, exp, exp);
 unary_shim!(sqrt, sqrt, sqrt);
 unary_shim!(cos, cos, cos);

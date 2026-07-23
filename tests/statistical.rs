@@ -1002,6 +1002,52 @@ fn ams_renyi2_entropy_tracks_truth_on_zipf_stream() {
 }
 
 #[test]
+fn entropy_sampler_tracks_shannon_on_zipf_stream() {
+    use adumbratio::sketch::{CountMinSketch, EntropySampler};
+
+    // Zipf(1.1) stream; exact Shannon entropy computed from true counts.
+    let counts = zipf_counts(10_000, 200_000, 11);
+    let n = 200_000_f64;
+    let truth: f64 = -counts
+        .iter()
+        .filter(|&&c| c > 0)
+        .map(|&c| {
+            let p = c as f64 / n;
+            p * p.log2()
+        })
+        .sum::<f64>();
+
+    let hasher = DefaultBuildHasher::new(11);
+    let mut sampler = EntropySampler::with_seed(1_024, 11);
+    let mut cms = CountMinSketch::with_error_and_seed(0.001, 0.01, 11);
+    for (item, &count) in counts.iter().enumerate() {
+        for _ in 0..count {
+            sampler.insert_item(&(item as u64));
+            cms.insert_item(&(item as u64));
+        }
+    }
+
+    // Exact oracle: the estimator is unbiased, so expect a tight match.
+    let mut exact: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
+    for (item, &count) in counts.iter().enumerate() {
+        exact.insert(hash_one(&hasher, &(item as u64)), count);
+    }
+    let oracle = |hash: u64| *exact.get(&hash).unwrap_or(&0);
+    let exact_estimate = sampler.shannon_entropy(oracle);
+    assert!(
+        (exact_estimate - truth).abs() <= 0.3,
+        "exact-oracle H {exact_estimate} vs truth {truth}"
+    );
+
+    // CMS oracle: the sketch's point error passes through; allow slack.
+    let cms_estimate = sampler.shannon_entropy(|hash| cms.estimate_hash(hash));
+    assert!(
+        (cms_estimate - truth).abs() <= 0.6,
+        "CMS-oracle H {cms_estimate} vs truth {truth}"
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

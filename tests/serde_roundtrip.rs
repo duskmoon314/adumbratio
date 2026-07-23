@@ -7,7 +7,7 @@
 use adumbratio::sketch::{
     AmsSketch, BBitMinHash, BinaryFuseFilter, BlockedBloomFilter, BloomFilter,
     CountMinSketch, CountSketch, CountingBloomFilter, CuckooFilter, DdSketch,
-    HyperLogLog, Iblt, KllSketch, MinHash, MisraGries, QuotientFilter,
+    EntropySampler, HyperLogLog, Iblt, KllSketch, MinHash, MisraGries, QuotientFilter,
     SemiSortedCuckooFilter, SimHash, SpaceSaving, ThetaSketch, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
@@ -293,6 +293,24 @@ fn top_k_count_sketch_round_trip_preserves_candidates() {
     let restored: TopK<u64, _, adumbratio::sketch::CountSketch> = round_trip(&top);
     assert_eq!(restored.top_k(), top.top_k());
     assert_eq!(restored.total_count(), top.total_count());
+}
+
+#[test]
+fn entropy_sampler_round_trip_preserves_estimate() {
+    let mut sampler = EntropySampler::with_seed(512, 5);
+    let mut counts = std::collections::HashMap::new();
+    let hasher = DefaultBuildHasher::new(5);
+    for i in 0..5_000_u64 {
+        sampler.insert_item(&i);
+        *counts.entry(hash_one(&hasher, &i)).or_insert(0) += 1;
+    }
+    let restored: EntropySampler = round_trip(&sampler);
+    let oracle = |hash: u64| *counts.get(&hash).unwrap_or(&0);
+    assert_eq!(restored.total_count(), sampler.total_count());
+    assert_eq!(
+        restored.shannon_entropy(oracle),
+        sampler.shannon_entropy(oracle)
+    );
 }
 
 #[test]

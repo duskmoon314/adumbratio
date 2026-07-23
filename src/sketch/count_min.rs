@@ -263,7 +263,14 @@ where
     where
         T: Hash + ?Sized,
     {
-        let hash = hash_one(&self.hasher, item);
+        self.estimate_hash(hash_one(&self.hasher, item))
+    }
+
+    /// Estimates the frequency of the item behind a pre-hashed 64-bit
+    /// value, using the same derivation as [`Self::estimate_item`]. Useful
+    /// when hashes are stored instead of items (e.g. by an
+    /// [`crate::sketch::EntropySampler`]).
+    pub fn estimate_hash(&self, hash: u64) -> u64 {
         self.row_indices(hash)
             .enumerate()
             .map(|(row, index)| self.rows.row(row).get(index))

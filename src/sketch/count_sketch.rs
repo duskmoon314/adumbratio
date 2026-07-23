@@ -197,7 +197,12 @@ where
     where
         T: Hash + ?Sized,
     {
-        let hash = hash_one(&self.hasher, item);
+        self.estimate_signed_hash(hash_one(&self.hasher, item))
+    }
+
+    /// Returns the signed estimate for the item behind a pre-hashed 64-bit
+    /// value, using the same derivation as [`Self::estimate_signed`].
+    pub fn estimate_signed_hash(&self, hash: u64) -> i64 {
         let mut estimates: Vec<_> = (0..self.geometry.depth)
             .map(|row| {
                 let index = row_index(hash, row, self.geometry.width);
