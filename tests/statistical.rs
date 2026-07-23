@@ -781,6 +781,47 @@ fn ddsketch_relative_error_holds_across_quantiles() {
 }
 
 #[test]
+fn semi_sorted_cuckoo_high_load_and_fpp() {
+    use adumbratio::sketch::SemiSortedCuckooFilter;
+
+    // Twin-aware like the plain cuckoo test: removal guarantees hold per
+    // fingerprint pair, so remove only group leaders.
+    let (seed, n) = (7, 10_000_u64);
+    let mut filter = SemiSortedCuckooFilter::with_capacity_and_seed(n, 0.001, seed);
+    let quotient_bits = filter.geometry().buckets.trailing_zeros();
+
+    let key = |item: u64| {
+        let hash = hash_one(&DefaultBuildHasher::new(seed), &item);
+        let fp = PartialKeyCuckoo::fingerprint(15, hash);
+        let first = PartialKeyCuckoo::bucket(hash, 1 << quotient_bits);
+        let second = PartialKeyCuckoo::alt_bucket(first, fp, 1 << quotient_bits);
+        (fp, first.min(second))
+    };
+    let mut seen = std::collections::HashSet::new();
+    let leaders: Vec<u64> = (0..n).filter(|&i| seen.insert(key(i))).collect();
+
+    for &i in &leaders {
+        filter.insert_item(&i).expect("insert below target load");
+    }
+    for &i in &leaders {
+        assert!(filter.contains_item(&i), "missing {i}");
+    }
+    for &i in leaders.iter().step_by(2) {
+        assert!(filter.remove_item(&i), "stored leader {i} was not removable");
+    }
+    for &i in leaders.iter().skip(1).step_by(2) {
+        assert!(filter.contains_item(&i), "missing {i} after deletions");
+    }
+
+    let bound = filter.expected_fpp();
+    let fpp = false_positive_rate(n, 100_000, |i| filter.contains_item(&i));
+    assert!(
+        fpp <= 1.5 * bound + 0.0005,
+        "empirical FPP {fpp} exceeds bound {bound}"
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

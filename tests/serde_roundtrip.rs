@@ -7,8 +7,8 @@
 use adumbratio::sketch::{
     AmsSketch, BBitMinHash, BinaryFuseFilter, BlockedBloomFilter, BloomFilter,
     CountMinSketch, CountSketch, CountingBloomFilter, CuckooFilter, DdSketch,
-    HyperLogLog, KllSketch, MinHash, MisraGries, QuotientFilter, SimHash, SpaceSaving,
-    ThetaSketch, TopK, XorFilter,
+    HyperLogLog, KllSketch, MinHash, MisraGries, QuotientFilter, SemiSortedCuckooFilter,
+    SimHash, SpaceSaving, ThetaSketch, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -252,6 +252,19 @@ fn ddsketch_round_trip_preserves_quantiles() {
     assert_eq!(restored.count(), sketch.count());
     assert_eq!(restored.buckets(), sketch.buckets());
     assert_eq!(restored.quantile(0.99), sketch.quantile(0.99));
+}
+
+#[test]
+fn semi_sorted_cuckoo_round_trip_preserves_occupancy() {
+    let mut filter = SemiSortedCuckooFilter::with_capacity_and_seed(10_000, 0.001, 9);
+    for i in 0..8_000_u64 {
+        filter.insert_item(&i).expect("insert below target load");
+    }
+    let restored: SemiSortedCuckooFilter = round_trip(&filter);
+    assert_eq!(restored.occupancy(), filter.occupancy());
+    for i in (0..8_000_u64).step_by(5) {
+        assert!(restored.contains_item(&i));
+    }
 }
 
 #[test]

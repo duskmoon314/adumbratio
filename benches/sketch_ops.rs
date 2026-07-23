@@ -547,6 +547,45 @@ fn bench_frequent(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_semi_sorted_cuckoo(c: &mut Criterion) {
+    let mut group = c.benchmark_group("semi_sorted_cuckoo");
+    quick(&mut group);
+
+    let present = items(50_000, 1);
+    let absent = items(50_000, 2);
+    let mut filter = adumbratio::sketch::SemiSortedCuckooFilter::with_capacity(50_000, 0.001);
+    for item in &present {
+        filter.insert_item(item).unwrap();
+    }
+
+    group.bench_function("query_hit", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&present[i % present.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.bench_function("query_miss", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let hit = filter.contains_item(black_box(&absent[i % absent.len()]));
+            i += 1;
+            black_box(hit)
+        });
+    });
+    group.bench_function("insert_remove", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            let item = &absent[i % absent.len()];
+            let _ = filter.insert_item(black_box(item));
+            let _ = filter.remove_item(black_box(item));
+            i += 1;
+        });
+    });
+    group.finish();
+}
+
 fn bench_simhash(c: &mut Criterion) {
     let mut group = c.benchmark_group("simhash");
     quick(&mut group);
@@ -655,6 +694,7 @@ criterion_group!(
     bench_kll,
     bench_minhash,
     bench_quotient_filter,
+    bench_semi_sorted_cuckoo,
     bench_simhash,
     bench_theta,
     bench_top_k,
