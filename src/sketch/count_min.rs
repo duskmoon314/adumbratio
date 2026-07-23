@@ -362,7 +362,7 @@ where
     }
 
     fn insert_weighted(&mut self, item: &T, count: u64) {
-        Self::insert_count(self, item, count);
+        self.insert_count(item, count);
     }
 
     fn total(&self) -> u64 {
@@ -381,7 +381,7 @@ where
     }
 
     fn insert_weighted(&mut self, item: &T, count: u64) {
-        Self::insert_count(self, item, count);
+        self.insert_count(item, count);
     }
 
     fn total(&self) -> u64 {

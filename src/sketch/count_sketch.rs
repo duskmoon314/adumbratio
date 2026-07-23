@@ -185,7 +185,8 @@ where
         for row in 0..self.geometry.depth {
             let index = row_index(hash, row, self.geometry.width);
             let signed = decode(self.rows.row(row).get(index));
-            let next = signed.saturating_add(sign(hash, row) * count);
+            let delta = sign(hash, row).saturating_mul(count);
+            let next = signed.saturating_add(delta);
             self.rows.row_mut(row).set(index, encode(next));
         }
         self.total_count = self.total_count.saturating_add(count.unsigned_abs());
@@ -391,6 +392,16 @@ mod tests {
         weighted.insert_signed("a", -4);
         assert!(weighted.estimate_signed("a") <= 9);
         assert_eq!(weighted.total_count(), 13);
+    }
+
+    #[test]
+    fn signed_insert_handles_i64_min_without_panicking() {
+        let mut sketch = CountSketch::with_error(0.1, 0.01);
+        sketch.insert_item("a");
+        // count == i64::MIN would overflow a naive sign * count multiply in
+        // debug builds; saturating_mul keeps it defined.
+        sketch.insert_signed("a", i64::MIN);
+        assert_eq!(sketch.total_count(), 1 + i64::MIN.unsigned_abs());
     }
 
     #[test]
