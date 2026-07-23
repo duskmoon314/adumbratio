@@ -875,6 +875,38 @@ fn iblt_decode_and_reconcile_are_exact() {
 }
 
 #[test]
+fn hyperloglog_sparse_mode_matches_dense_accuracy() {
+    use adumbratio::sketch::HyperLogLog;
+
+    // b = 14: sparse until 4096 registers are set. Small-n estimates go
+    // through the sparse path; large-n through dense. Both must satisfy
+    // the same error bound, and sparse storage must be smaller meanwhile.
+    let mut sketch = HyperLogLog::with_seed(14, 5);
+    for i in 0..1_000_u64 {
+        sketch.insert_item(&i);
+    }
+    assert!(sketch.is_sparse());
+    assert!(sketch.storage_bytes() < 12_288 / 4);
+
+    let estimate = sketch.cardinality();
+    assert!(
+        (estimate - 1_000.0).abs() / 1_000.0 <= 0.02,
+        "sparse estimate {estimate} off by more than 2% at n = 1000"
+    );
+
+    for i in 1_000..10_000_u64 {
+        sketch.insert_item(&i);
+    }
+    assert!(!sketch.is_sparse());
+    let estimate = sketch.cardinality();
+    let sigma = sketch.standard_error();
+    assert!(
+        (estimate - 10_000.0).abs() / 10_000.0 <= 4.0 * sigma,
+        "dense estimate {estimate} beyond 4 sigma"
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;
