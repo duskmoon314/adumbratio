@@ -3,6 +3,7 @@ name = "adumbratio"
 version = "0.1.0"
 authors = ["duskmoon (Campbell He) <kp.campbell.he@duskmoon314.com>"]
 edition = "2024"
+repository = "https://github.com/duskmoon314/adumbratio"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 description = "Composable building blocks for probabilistic data structures (sketches), with the classical sketches assembled from them"
