@@ -150,7 +150,15 @@ impl<T> MisraGries<T> {
 }
 
 impl<T: Eq> MisraGries<T> {
-    /// Inserts `count` occurrences of `item` at once.
+    /// Inserts `count` occurrences of `item` at once, as one event of
+    /// weight `count`.
+    ///
+    /// Note this is *not* equivalent to calling [`Self::insert_item`]
+    /// `count` times: when the item is untracked and the summary is full,
+    /// the weighted form debits every counter by the whole `count` in one
+    /// step, while iterated inserts would debit progressively with
+    /// different intermediate counters. For tracked items (the common
+    /// case) the two coincide.
     pub fn insert_count(&mut self, item: &T, count: u64)
     where
         T: Clone,
@@ -268,8 +276,15 @@ impl<T> SpaceSaving<T> {
 }
 
 impl<T: Eq> SpaceSaving<T> {
-    /// Inserts `count` occurrences of `item` at once, the weighted form the
-    /// paper's merge builds on.
+    /// Inserts `count` occurrences of `item` at once, as one event of
+    /// weight `count` — the weighted form the paper's merge builds on.
+    ///
+    /// Note this is *not* equivalent to calling [`Self::insert_item`]
+    /// `count` times: when the item is untracked and the summary is full,
+    /// the weighted form replaces the minimum entry once with
+    /// `min + count` (error `min`), while iterated inserts would churn
+    /// through replacement chains with different intermediate minima.
+    /// For tracked items (the common case) the two coincide.
     pub fn insert_count(&mut self, item: &T, count: u64)
     where
         T: Clone,
@@ -500,6 +515,42 @@ mod tests {
         assert_eq!(mg_left.merge_from(&other_k), Err(MergeError::GeometryMismatch));
         let other_k = SpaceSaving::<u64>::new(5);
         assert_eq!(ss_left.merge_from(&other_k), Err(MergeError::GeometryMismatch));
+    }
+
+    #[test]
+    fn weighted_insert_differs_from_iteration_on_the_miss_path() {
+        // Tracked path: weighted and iterated inserts coincide exactly.
+        let mut weighted = MisraGries::new(2);
+        let mut iterated = MisraGries::new(2);
+        for item in ["a", "b"] {
+            weighted.insert_item(&item);
+            iterated.insert_item(&item);
+        }
+        weighted.insert_count(&"a", 5);
+        for _ in 0..5 {
+            iterated.insert_item(&"a");
+        }
+        assert_eq!(weighted.counters(), iterated.counters());
+
+        // Miss path on fresh summaries: a weight-3 event debits every
+        // counter by 3 in one step (consuming the weight), while three unit
+        // inserts drop the old items once and then start tracking the new
+        // one.
+        let mut weighted = MisraGries::new(2);
+        let mut iterated = MisraGries::new(2);
+        for item in ["a", "b"] {
+            weighted.insert_item(&item);
+            iterated.insert_item(&item);
+        }
+        weighted.insert_count(&"c", 3);
+        for _ in 0..3 {
+            iterated.insert_item(&"c");
+        }
+        assert!(
+            !weighted.counters().iter().any(|(item, _)| *item == "c"),
+            "the weight-3 event must be consumed by the debits"
+        );
+        assert_eq!(iterated.estimate_item(&"c"), 2);
     }
 
     #[test]
