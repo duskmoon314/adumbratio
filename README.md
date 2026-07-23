@@ -1,36 +1,23 @@
 # adumbratio
 
-> **Note:** This crate is developed with heavy LLM assistance. The
-> implementation, tests, and documentation are substantially
-> machine-generated (with human review), so **use at your own risk** — run
-> the statistical suite (`cargo test`) and the paper-reproduction examples
-> (`examples/`) against your own workloads before trusting it in
-> production.
+> **Note:** developed with heavy LLM assistance — substantially
+> machine-generated with human review. **Use at your own risk:** run
+> `cargo test` and the `examples/` against your own workloads before
+> trusting it in production.
 
-> **Status: actively developed.** All roadmap sketches are implemented and
-> validated against their papers' guarantees by a seeded statistical suite
-> (plus paper-reproduction examples and benchmarks): Bloom, Counting Bloom,
-> Blocked Bloom, Count-Min (+ conservative update), Count Sketch, Cuckoo
-> (+ semi-sorted variant), Quotient, xor and binary fuse filters,
-> HyperLogLog (+ sparse mode), MinHash (+ b-bit), SimHash, AMS, Misra–Gries,
-> Space-Saving, TopK (Count-Min or Count Sketch backend), KLL, DDSketch,
-> theta sketch, and IBLT. `serde` and `no_std` (+`alloc`, optional `libm`)
-> are supported; the crate forbids `unsafe` and has zero mandatory
-> dependencies. See [DESIGN.md](DESIGN.md) for the architecture.
+Composable building blocks for probabilistic data structures ("sketches")
+in Rust — plus 25 classical sketches assembled from them.
 
-Composable building blocks for probabilistic data structures ("sketches") in
-Rust — plus the classical sketches assembled from them.
-
-Most sketch libraries ship each structure as a sealed black box: a Bloom
-filter here, a Count-Min Sketch there, each with its own storage code, its
-own hashing, its own API. But structurally these are all the same few parts
-in different arrangements:
+Most sketch libraries ship each structure as a sealed black box, but
+structurally they are all the same few parts in different arrangements:
 
 ```
 sketch = storage layout × index derivation × update policy
 ```
 
-`adumbratio` makes those parts first-class:
+`adumbratio` makes those parts first-class. The built-in sketches use only
+the public block API, so anything the crate can't compose is a bug in the
+blocks, not a special case:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -52,179 +39,93 @@ sketch = storage layout × index derivation × update policy
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-Use the ready-made classical sketches, or build directly from the public
-blocks when a workload needs a custom composition.
+## Quick start
 
-## Implemented sketches
-
-| Sketch | Answers | Built from | Stage |
-|---|---|---|---|
-| Bloom filter | membership (no false negatives) | `BitArray` + `DoubleHashing` | ✅ 2 |
-| Counting Bloom filter | membership + deletion | `PackedArray<4>` + `DoubleHashing` + `Saturating` | ✅ 3 |
-| Count-Min Sketch (+ conservative update) | frequency (never underestimates) | `Matrix<PackedArray<32>>` + row indexing | ✅ 3 |
-| Count Sketch | frequency (unbiased) | `Matrix<PackedArray<64>>` + signed median read | ✅ 3 |
-| Cuckoo filter | membership + deletion, high load factor | `BucketArray<F>` + `PartialKeyCuckoo` + `KickLoop` | ✅ 3 |
-| Blocked Bloom filter | membership, cache-friendly | `BitArray` + `Blocked` scheme | ✅ 4 |
-| HyperLogLog | cardinality (1.04/√m error) | `PackedArray<6>` registers + max update | ✅ 5 |
-| MinHash | set similarity (1/√k error) | k hash-derivation minima + element-wise min merge | ✅ 5 |
-| TopK | heavy hitters | `CountMinSketch` + candidate set | ✅ 5 |
-| KLL | quantiles / rank (~1/k error) | compactor hierarchy (levels of sorted buffers) | ✅ 6 |
-| xor filter | static membership, ~1.23·log2(1/ε) bits/item | 3-segment xor table + hypergraph peeling | ✅ 6 |
-| quotient filter | membership + deletion + merge, cache-linear | `PackedArray<R>` remainders + 3 `BitArray` metadata rows | ✅ 6 |
-| theta sketch | cardinality + union/intersection/difference | bottom-k (k smallest hashes) | ✅ 7 |
-| SimHash | cosine similarity | sign pattern of ±1 bit sums (linear merge) | ✅ 7 |
-| AMS sketch | L2 norm / self-join size | tug-of-war signed counters + median-of-means | ✅ 7 |
-| Misra–Gries | deterministic heavy hitters (lower bounds) | k counters + decrement-all | ✅ 7 |
-| Space-Saving | deterministic heavy hitters (upper bounds) | k entries + replace-the-minimum | ✅ 7 |
-| binary fuse filter | static membership, ~1.125·f bits/item | fuse-schedule xor table + hypergraph peeling | ✅ 8 |
-| b-bit MinHash | set similarity, 8× smaller signatures | low-b bits of minima + collision correction | ✅ 8 |
-| DDSketch | quantiles with relative error ±α | logarithmic buckets, count-per-bucket | ✅ 8 |
-
-Each sketch's doc comments cite the paper it reproduces (with DOI links),
-and the integration tests in `tests/` validate the paper's guarantees
-empirically: false-positive rates against the analytical bound, frequency
-error within `ε·N`, no false negatives under deletion workloads, and merge
-algebra.
-
-Future candidates: ribbon filter, HyperMinHash, t-digest. See
-[DESIGN.md](DESIGN.md) for the roadmap.
-
-## Usage
-
-Ready-made, target-driven construction:
+```toml
+[dependencies]
+adumbratio = "0.1"
+```
 
 ```rust
-use adumbratio::sketch::{
-    BlockedBloomFilter, BloomFilter, CountMinSketch, CountSketch, CountingBloomFilter,
-    CuckooFilter,
-};
+use adumbratio::sketch::{BloomFilter, CountMinSketch, HyperLogLog};
 
 // 10M expected items, 1% false-positive rate — m and k solved for you
 let mut bloom = BloomFilter::with_capacity(10_000_000, 0.01);
 bloom.insert_item("alice");
 assert!(bloom.contains_item("alice"));
 
-// Same, but all probed bits live in one cache-line block
-let mut blocked = BlockedBloomFilter::with_capacity(10_000_000, 0.01);
-blocked.insert_item("alice");
-assert!(blocked.contains_item("alice"));
-
-let mut counting = CountingBloomFilter::with_capacity(10_000, 0.01);
-counting.insert_item("alice");
-assert!(counting.remove_item("alice"));
-
 let mut cms = CountMinSketch::with_error(0.001, 0.01);
-cms.insert_item("get /index");
-assert!(cms.estimate_item("get /index") >= 1);
+cms.insert_count("get /index", 1500); // byte-weighted inserts
+assert!(cms.estimate_item("get /index") >= 1500);
 
-let mut count_sketch = CountSketch::with_error(0.05, 0.01);
-count_sketch.insert_item("get /index");
-assert!(count_sketch.estimate_item("get /index") >= 1);
-
-let mut cuckoo = CuckooFilter::with_capacity(1_000, 0.01);
-cuckoo.insert_item(&42u64)?;
-assert!(cuckoo.remove_item(&42u64));
+let mut hll = HyperLogLog::new(12);
+hll.insert_item("10.0.0.1");
+assert!(hll.cardinality() >= 0.99);
 ```
 
-The sketches also speak capability traits, so downstream code can be generic
-over "anything that answers membership queries":
+Every sketch also speaks capability traits (`Insert`, `Contains`,
+`EstimateCount`, `Merge`, …), so downstream code can be generic over
+"anything that answers membership queries".
 
-```rust
-use adumbratio::traits::{Contains, Insert};
+## Sketch catalog
 
-fn seen<F>(filter: &mut F, item: &str) -> bool
-where
-    F: Contains<str> + Insert<str>,
-{
-    if filter.contains(item) {
-        true
-    } else {
-        let _ = filter.insert(item);
-        false
-    }
-}
-```
+| Sketch | Answers | Built from |
+|---|---|---|
+| Bloom filter | membership (no false negatives) | `BitArray` + `DoubleHashing` |
+| Counting Bloom filter | membership + deletion | `PackedArray<4>` + `DoubleHashing` + `Saturating` |
+| Blocked Bloom filter | membership, cache-friendly | `BitArray` + `Blocked` scheme |
+| Cuckoo filter | membership + deletion, high load | `BucketArray<F>` + `PartialKeyCuckoo` + `KickLoop` |
+| Semi-sorted cuckoo filter | membership + deletion, 12% smaller | combinatorial-rank buckets in `PackedArray<56>` |
+| Quotient filter | membership + deletion + merge | `PackedArray<R>` remainders + 3 `BitArray` metadata rows |
+| xor filter | static membership, ~1.23·log2(1/ε) bits/item | 3-segment xor table + hypergraph peeling |
+| binary fuse filter | static membership, ~1.125·f bits/item | fuse-schedule xor table + hypergraph peeling |
+| Count-Min Sketch (±CU) | frequency (never underestimates) | `Matrix<PackedArray<32>>` + row indexing |
+| Count Sketch | frequency (unbiased) | `Matrix<PackedArray<64>>` + signed median read |
+| AMS sketch | L2 norm, self-join size, Rényi-2 entropy | tug-of-war signed counters + median-of-means |
+| Misra–Gries | deterministic heavy hitters (lower bounds) | k counters + decrement-all |
+| Space-Saving | deterministic heavy hitters (upper bounds) | k entries + replace-the-minimum |
+| TopK | heavy hitters | `CountMinSketch` or `CountSketch` + candidate set |
+| HyperLogLog (+ sparse mode) | cardinality (1.04/√m error) | `PackedArray<6>` registers + max update |
+| theta sketch | cardinality + union/intersection/difference | bottom-k (k smallest hashes) |
+| MinHash | set similarity (1/√k error) | k hash-derivation minima + element-wise min merge |
+| b-bit MinHash | set similarity, 8× smaller signatures | low-b bits of minima + collision correction |
+| SimHash | cosine similarity | sign pattern of ±1 bit sums (linear merge) |
+| EntropySampler | Shannon entropy | priority-sampling slots + frequency oracle |
+| KLL | quantiles / rank (~1/k error) | compactor hierarchy (sorted buffer levels) |
+| DDSketch | quantiles with relative error ±α | logarithmic buckets, count-per-bucket |
+| IBLT | membership + set reconciliation | `(count, key_sum, hash_sum)` cells |
 
-You can also use the implemented blocks directly:
+Each sketch's doc comments cite the paper it reproduces (with DOI links).
+The `tests/` suites validate those guarantees empirically: error bounds
+from the papers, no false negatives under deletion workloads, and merge
+algebra.
 
-```rust
-use adumbratio::block::{BitArray, PackedArray};
+## Using it
 
-let mut bits = BitArray::new(128);
-bits.set(7);
-assert!(bits.get(7));
+- **Construction.** Every sketch has geometry-explicit constructors
+  (`from_geometry`, `from_parts`) and target-driven ones
+  (`with_capacity(n, fpp)`, `with_error(eps, delta)`) that solve the
+  standard formulas. All take an explicit `u64` seed.
+- **Adversarial inputs.** The default `StableHasher` is deterministic and
+  platform-stable (what `merge` and `serde` need) but **not** DoS-resistant.
+  For attacker-controlled keys, use a random per-boot seed, or swap any
+  `BuildHasher` via `from_parts` — trading merge/serde stability for
+  hash-flooding resistance per deployment.
+- **Features.** `serde` (serialization), `no_std` (+`alloc`), and `libm`
+  (float math without `std`) are all opt-in; the crate is
+  `#![forbid(unsafe_code)]` with zero mandatory dependencies.
 
-let mut counters = PackedArray::<4>::new(16);
-counters.set(3, 15);
-assert_eq!(counters.get(3), 15);
-```
+## Examples, tests, benchmarks
 
-## Adversarial inputs
-
-The default `StableHasher` is deterministic and platform-stable — exactly
-what `merge` and `serde` need — but it is **not** a defense against
-hash-flooding. If you hash attacker-controlled keys (source IPs, domains),
-an adversary who learns the seed can manufacture collisions and degrade
-every probabilistic guarantee. Recommended production setups:
-
-- **Random seed per boot or tenant.** Every `from_geometry(geometry, seed)`
-  and `with_*_and_seed` constructor takes an explicit `u64` seed. Two
-  sketches merge only when seeds match (checked via seed fingerprints), and
-  a seed change means rebuilding the sketch — seeds are cheap, but they are
-  part of your compatibility story.
-- **Swap the hasher.** The `from_parts(geometry, seed_fingerprint, hasher)`
-  constructors accept any `BuildHasher` (std's `RandomState`, or a keyed
-  external hasher). The sketch logic is hasher-agnostic; what changes is
-  determinism — a non-stable hasher breaks merge and serialization
-  round-trips across runs, so pick stability or DoS-resistance per
-  deployment.
-
-## Examples: reproducing the papers
-
-Each sketch's doc comments cite the paper it implements. The `examples/`
-programs go further and reproduce the papers' evaluation methodology on
-synthetic data, printing measured values next to the analytical
-predictions:
-
-- `cargo run --release --example bloom_fpp` — empirical FPP vs. Bloom's
-  formula across `k` (validating double hashing per Kirsch–Mitzenmacher),
-  plus the blocked filter's FPP trade-off per Putze–Sanders–Singler.
-- `cargo run --release --example cuckoo_load_fpp` — FPP vs. occupancy, max
-  load factor (~95%), and the bits-per-item space comparison with Bloom
-  filters, per Fan et al. 2014.
-- `cargo run --release --example count_min_zipf` — Count-Min error vs. the
-  `ε·N` bound on a Zipf stream, the conservative-update improvement
-  (Estan–Varghese), and heavy-hitter accuracy vs. Count Sketch.
-
-## Benchmarks
-
-`cargo bench` runs a criterion suite over insert/query/remove/estimate for
-every sketch (deterministic inputs, ~2s per measurement). Baselines are kept
-under `target/criterion/` so regressions show up as percentage changes on
-subsequent runs.
-
-## Design principles
-
-- **Composability first** — the built-in sketches use only the public block
-  API; if the blocks can't express a classic sketch, the blocks are wrong.
-- **Correct by construction** — each block owns one invariant (saturated
-  counters stay sticky, fingerprints are never the empty marker, cuckoo
-  alternate-bucket mapping is an involution), so compositions inherit
-  correctness.
-- **Deterministic and mergeable** — same seed ⇒ bit-identical sketches across
-  platforms; `merge` checks geometry/seed compatibility instead of silently
-  corrupting.
-- **Pay only for what you use** — zero mandatory dependencies; `serde`,
-  external hashers, and `rand` are opt-in features; `no_std` (+`alloc`) is a
-  design constraint from the start.
-
-## Roadmap
-
-1. ✅ **Design** — [DESIGN.md](DESIGN.md)
-2. ✅ Storage/hashing/policy blocks + capability traits + Bloom filter, fully tested
-3. ✅ Counting Bloom, Count-Min (+CU), Count Sketch, Cuckoo filter
-4. ◐ Blocked Bloom ✅, statistical/merge suites ✅, `serde` ✅, `no_std`(+`alloc`, optional `libm`) ✅; 0.1 release pending
-5. HyperLogLog, MinHash, top-k, benchmarks against existing crates
+- `cargo run --release --example <name>` — 20 examples that reproduce each
+  paper's evaluation on synthetic data (FPP curves, error laws, space
+  tables, set reconciliation, entropy) with detailed methodology comments.
+- `cargo test` — unit, seeded statistical, merge-algebra, hash-quality, and
+  serde round-trip suites. `cargo test --no-default-features --features libm`
+  covers the `no_std` build.
+- `cargo bench` — 22 criterion groups for every sketch, including
+  head-to-head comparisons against the `bloomfilter` and `cuckoofilter`
+  crates.
 
 ## License
 
