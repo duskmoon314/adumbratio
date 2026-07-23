@@ -108,7 +108,7 @@ impl<S> EntropySampler<S> {
     }
 
     /// Returns the item hashes held by the non-empty slots.
-    pub fn sampled(&self) -> impl Iterator<Item = u64> + '_ {
+    pub fn sampled_hashes(&self) -> impl Iterator<Item = u64> + '_ {
         self.keys.iter().copied().filter(|&key| key != 0)
     }
 
@@ -165,7 +165,7 @@ where
         }
         let mut sum = 0.0_f64;
         let mut occupied = 0_usize;
-        for key in self.sampled() {
+        for key in self.sampled_hashes() {
             let frequency = estimate(key);
             if frequency > 0 {
                 let p = frequency as f64 / self.total as f64;
@@ -244,7 +244,7 @@ mod tests {
     fn empty_sampler_has_zero_entropy() {
         let sampler = EntropySampler::new(16);
         assert_eq!(sampler.shannon_entropy(|_| 1), 0.0);
-        assert_eq!(sampler.sampled().count(), 0);
+        assert_eq!(sampler.sampled_hashes().count(), 0);
     }
 
     #[test]

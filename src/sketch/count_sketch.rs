@@ -281,7 +281,7 @@ where
         self.estimate_item(item)
     }
 
-    fn insert_weighted(&mut self, item: &T, count: u64) {
+    fn insert_count(&mut self, item: &T, count: u64) {
         Self::insert_count(self, item, count);
     }
 

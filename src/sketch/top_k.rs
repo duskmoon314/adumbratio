@@ -240,7 +240,7 @@ where
     {
         use std::cmp::Reverse;
 
-        Estimator::insert_weighted(&mut self.sketch, item, 1);
+        Estimator::insert_count(&mut self.sketch, item, 1);
 
         if let Some(&slot) = self.index.get(item) {
             let estimate = Estimator::estimate(&self.sketch, item);
@@ -287,7 +287,7 @@ where
     where
         T: Clone,
     {
-        Estimator::insert_weighted(&mut self.sketch, item, 1);
+        Estimator::insert_count(&mut self.sketch, item, 1);
 
         if self.candidates.iter().any(|candidate| candidate == item) {
             return;

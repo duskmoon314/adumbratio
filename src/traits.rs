@@ -82,7 +82,7 @@ pub trait Estimator<T: ?Sized>: Sketch + Merge {
     fn estimate(&self, item: &T) -> u64;
 
     /// Inserts `item` with weight `count`.
-    fn insert_weighted(&mut self, item: &T, count: u64);
+    fn insert_count(&mut self, item: &T, count: u64);
 
     /// Returns the total number of inserted events (gross weighted volume).
     fn total(&self) -> u64;
