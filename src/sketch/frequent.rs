@@ -412,6 +412,8 @@ impl<T: Eq + Clone> Merge for SpaceSaving<T> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::{MisraGries, SpaceSaving};
     use crate::error::MergeError;
     use crate::traits::{Insert, Merge, Sketch};

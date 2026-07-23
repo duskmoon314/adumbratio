@@ -257,6 +257,8 @@ impl<S> Merge for AmsSketch<S> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::AmsSketch;
     use crate::error::MergeError;
     use crate::traits::{Insert, Merge};

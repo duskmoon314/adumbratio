@@ -234,6 +234,8 @@ impl<const B: u32, S> Merge for BBitMinHash<B, S> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use super::BBitMinHash;
     use crate::error::MergeError;
     use crate::traits::{Insert, Merge};
