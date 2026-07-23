@@ -37,4 +37,4 @@ pub mod policy;
 pub mod sketch;
 pub mod traits;
 
-pub use error::MergeError;
+pub use error::{DecodeError, MergeError};

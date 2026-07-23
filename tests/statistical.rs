@@ -822,6 +822,59 @@ fn semi_sorted_cuckoo_high_load_and_fpp() {
 }
 
 #[test]
+fn iblt_decode_and_reconcile_are_exact() {
+    use adumbratio::sketch::Iblt;
+
+    // Two replicas with mostly-shared sets and small divergences, the
+    // set-reconciliation scenario of Eppstein et al. 2011.
+    let hasher = DefaultBuildHasher::new(3);
+    let mut a = Iblt::with_seed(2_000, 3);
+    let mut b = Iblt::with_seed(2_000, 3);
+    for i in 0..1_000_u64 {
+        a.insert_item(&i);
+        b.insert_item(&i);
+    }
+    for i in 1_000..1_050_u64 {
+        a.insert_item(&i);
+    }
+    for i in 1_050..1_100_u64 {
+        b.insert_item(&i);
+    }
+
+    // Decode of each side is exact.
+    assert_eq!(a.list_entries().unwrap().len(), 1_050);
+    assert_eq!(b.list_entries().unwrap().len(), 1_050);
+
+    // Reconciliation returns exactly the divergences, by hash.
+    let reconciliation = a.reconcile(&b).unwrap();
+    let only_a: std::collections::HashSet<u64> = (1_000..1_050_u64)
+        .map(|i| hash_one(&hasher, &i))
+        .collect();
+    let only_b: std::collections::HashSet<u64> = (1_050..1_100_u64)
+        .map(|i| hash_one(&hasher, &i))
+        .collect();
+    let got_a: std::collections::HashSet<u64> = reconciliation.only_in_self.into_iter().collect();
+    let got_b: std::collections::HashSet<u64> = reconciliation.only_in_other.into_iter().collect();
+    assert_eq!(got_a, only_a);
+    assert_eq!(got_b, only_b);
+
+    // Membership: no false negatives. The miss-side rate follows the
+    // occupancy theory (1 - e^(-kn/m))^k, which is high by construction —
+    // contains() is a side feature, not the point of an IBLT.
+    for i in 0..1_050_u64 {
+        assert!(a.contains_item(&i), "missing {i}");
+    }
+    let cells = a.cell_count() as f64;
+    let occupancy = 1.0 - (-4.0 * 1_050.0 / cells).exp();
+    let theoretical = occupancy.powi(4);
+    let fpp = false_positive_rate(2_000, 50_000, |i| a.contains_item(&i));
+    assert!(
+        (fpp - theoretical).abs() <= 0.05,
+        "empirical FPP {fpp} vs theoretical {theoretical} for an IBLT"
+    );
+}
+
+#[test]
 fn cuckoo_high_load_no_false_negatives_and_bounded_fpp() {
     let n = 10_000_u64;
     let seed = 7;

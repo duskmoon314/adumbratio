@@ -49,6 +49,24 @@ pub struct SketchFull {
     orphaned_fingerprint: u64,
 }
 
+/// Error returned when an invertible sketch cannot finish decoding.
+///
+/// Decoding an invertible Bloom lookup table fails when the table is too
+/// full to peel (no pure cell remains while entries are left) or when a
+/// residual cell fails the hash verification — for example after removing
+/// items that were never inserted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DecodeError;
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("invertible sketch failed to decode")
+    }
+}
+
+impl core::error::Error for DecodeError {}
+
 impl SketchFull {
     /// Creates an insertion-capacity error with the displaced fingerprint.
     pub const fn new(orphaned_fingerprint: u64) -> Self {

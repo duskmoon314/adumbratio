@@ -319,6 +319,29 @@ fn bench_top_k(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_iblt(c: &mut Criterion) {
+    let mut group = c.benchmark_group("iblt");
+    quick(&mut group);
+
+    let present = items(50_000, 1);
+    let mut table = adumbratio::sketch::Iblt::with_seed(60_000, 1);
+    for item in &present {
+        table.insert_item(item);
+    }
+
+    group.bench_function("insert", |b| {
+        let mut i = 0;
+        b.iter(|| {
+            table.insert_item(black_box(&present[i % present.len()]));
+            i += 1;
+        });
+    });
+    group.bench_function("decode_50k", |b| {
+        b.iter(|| black_box(table.list_entries().unwrap()));
+    });
+    group.finish();
+}
+
 fn bench_kll(c: &mut Criterion) {
     let mut group = c.benchmark_group("kll");
     quick(&mut group);
@@ -691,6 +714,7 @@ criterion_group!(
     bench_ddsketch,
     bench_frequent,
     bench_hyperloglog,
+    bench_iblt,
     bench_kll,
     bench_minhash,
     bench_quotient_filter,

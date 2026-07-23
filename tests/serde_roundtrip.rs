@@ -7,8 +7,8 @@
 use adumbratio::sketch::{
     AmsSketch, BBitMinHash, BinaryFuseFilter, BlockedBloomFilter, BloomFilter,
     CountMinSketch, CountSketch, CountingBloomFilter, CuckooFilter, DdSketch,
-    HyperLogLog, KllSketch, MinHash, MisraGries, QuotientFilter, SemiSortedCuckooFilter,
-    SimHash, SpaceSaving, ThetaSketch, TopK, XorFilter,
+    HyperLogLog, Iblt, KllSketch, MinHash, MisraGries, QuotientFilter,
+    SemiSortedCuckooFilter, SimHash, SpaceSaving, ThetaSketch, TopK, XorFilter,
 };
 use adumbratio::traits::{EstimateCardinality, Merge};
 
@@ -265,6 +265,21 @@ fn semi_sorted_cuckoo_round_trip_preserves_occupancy() {
     for i in (0..8_000_u64).step_by(5) {
         assert!(restored.contains_item(&i));
     }
+}
+
+#[test]
+fn iblt_round_trip_preserves_entries() {
+    let mut table = Iblt::with_seed(1_000, 3);
+    for i in 0..500_u64 {
+        table.insert_item(&i);
+    }
+    let restored: Iblt = round_trip(&table);
+    assert_eq!(restored.cell_count(), table.cell_count());
+    let mut expected = table.list_entries().unwrap();
+    let mut got = restored.list_entries().unwrap();
+    expected.sort_unstable();
+    got.sort_unstable();
+    assert_eq!(got, expected);
 }
 
 #[test]
