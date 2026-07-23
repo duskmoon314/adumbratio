@@ -4,6 +4,7 @@
 
 #![cfg(feature = "serde")]
 
+use adumbratio::hash::{DefaultBuildHasher, hash_one};
 use adumbratio::sketch::{
     AmsSketch, BBitMinHash, BinaryFuseFilter, BlockedBloomFilter, BloomFilter,
     CountMinSketch, CountSketch, CountingBloomFilter, CuckooFilter, DdSketch,
