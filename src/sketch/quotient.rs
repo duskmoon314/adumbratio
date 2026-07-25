@@ -65,6 +65,14 @@ pub struct QuotientFilter<const R: u32 = 10, S = DefaultBuildHasher> {
     len: usize,
     seed_fingerprint: u64,
     hasher: S,
+    /// Reusable cluster-decode buffers, cleared before every use so they
+    /// carry no logical state; kept on the struct to avoid one allocation
+    /// per insert/remove. Skipped by serde.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    scratch_pairs: Vec<(u64, u64)>,
+    /// See `scratch_pairs`.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    scratch_homes: Vec<u64>,
 }
 
 impl QuotientFilter<10, DefaultBuildHasher> {
@@ -129,6 +137,8 @@ impl<const R: u32, S> QuotientFilter<R, S> {
             len: 0,
             seed_fingerprint,
             hasher,
+            scratch_pairs: Vec::new(),
+            scratch_homes: Vec::new(),
         }
     }
 
@@ -229,10 +239,18 @@ impl<const R: u32, S> QuotientFilter<R, S> {
     /// `(quotient, remainder)` pairs. Runs and occupied bits appear in the
     /// same order, so the i-th run's home is the i-th occupied slot. Both
     /// scans are bounded to one full wrap for the full-table case.
-    fn decode_cluster(&self, start: usize) -> Vec<(u64, u64)> {
+    ///
+    /// `pairs` and `homes` are cleared first; passing reusable buffers avoids
+    /// one allocation per cluster operation.
+    fn decode_cluster_into(
+        &self,
+        start: usize,
+        pairs: &mut Vec<(u64, u64)>,
+        homes: &mut Vec<u64>,
+    ) {
+        pairs.clear();
+        homes.clear();
         let mask = self.table_len() - 1;
-        let mut pairs = Vec::new();
-        let mut homes = Vec::new();
         let mut slot = start;
         for _ in 0..self.table_len() {
             if self.slot_empty(slot) {
@@ -255,7 +273,51 @@ impl<const R: u32, S> QuotientFilter<R, S> {
             pairs.push((homes[run], self.remainders.get(slot)));
             slot = (slot + 1) & mask;
         }
+    }
+
+    /// Allocating variant of [`Self::decode_cluster_into`], for cold paths
+    /// (merge's pair enumeration, the debug encode self-check).
+    fn decode_cluster(&self, start: usize) -> Vec<(u64, u64)> {
+        let mut pairs = Vec::new();
+        let mut homes = Vec::new();
+        self.decode_cluster_into(start, &mut pairs, &mut homes);
         pairs
+    }
+
+    /// Allocation-free membership scan: walks the cluster at `start` once,
+    /// comparing remainders only inside the run whose home is `quotient`.
+    ///
+    /// The target run's index is the rank of `quotient` among the cluster's
+    /// occupied slots (the i-th run's home is the i-th occupied slot), and
+    /// its elements sit at or circularly after `quotient`, so a single
+    /// forward pass suffices. Equivalent to decoding and matching the pair
+    /// `(quotient, remainder)`. Bounded to one full wrap, like decoding.
+    fn run_contains(&self, start: usize, quotient: usize, remainder: u64) -> bool {
+        let mask = self.table_len() - 1;
+        let mut run = 0_usize;
+        let mut occupied_seen = 0_usize;
+        let mut target = None;
+        let mut slot = start;
+        for _ in 0..self.table_len() {
+            if self.slot_empty(slot) {
+                break;
+            }
+            if slot == quotient {
+                // Occupied slots strictly before `quotient` = its rank.
+                target = Some(occupied_seen);
+            }
+            if self.occupied.get(slot) {
+                occupied_seen += 1;
+            }
+            if !self.continuation.get(slot) && slot != start {
+                run += 1;
+            }
+            if target == Some(run) && self.remainders.get(slot) == remainder {
+                return true;
+            }
+            slot = (slot + 1) & mask;
+        }
+        false
     }
 
     /// Sorts pairs in cluster order: by circular distance of the quotient
@@ -367,15 +429,20 @@ where
         }
 
         let start = self.cluster_start(quotient);
-        let mut pairs = self.decode_cluster(start);
-        if pairs.contains(&(quotient as u64, remainder)) {
-            return Ok(());
+        // Take the scratch buffers out so decoding can borrow `self`
+        // immutably; they are put back below, keeping their capacity.
+        let mut pairs = core::mem::take(&mut self.scratch_pairs);
+        let mut homes = core::mem::take(&mut self.scratch_homes);
+        self.decode_cluster_into(start, &mut pairs, &mut homes);
+        if !pairs.contains(&(quotient as u64, remainder)) {
+            pairs.push((quotient as u64, remainder));
+            self.circular_sort(start, &mut pairs);
+            let old_len = pairs.len() - 1;
+            self.encode_cluster(start, old_len, &pairs);
+            self.len += 1;
         }
-        pairs.push((quotient as u64, remainder));
-        self.circular_sort(start, &mut pairs);
-        let old_len = pairs.len() - 1;
-        self.encode_cluster(start, old_len, &pairs);
-        self.len += 1;
+        self.scratch_pairs = pairs;
+        self.scratch_homes = homes;
         Ok(())
     }
 
@@ -389,10 +456,7 @@ where
             return false;
         }
         let start = self.cluster_start(quotient);
-        let pairs = self.decode_cluster(start);
-        pairs
-            .iter()
-            .any(|&(q, r)| q == quotient as u64 && r == remainder)
+        self.run_contains(start, quotient, remainder)
     }
 
     /// Removes one stored occurrence of `item`, returning whether a
@@ -409,19 +473,25 @@ where
             return false;
         }
         let start = self.cluster_start(quotient);
-        let mut pairs = self.decode_cluster(start);
-        let Some(position) = pairs
+        let mut pairs = core::mem::take(&mut self.scratch_pairs);
+        let mut homes = core::mem::take(&mut self.scratch_homes);
+        self.decode_cluster_into(start, &mut pairs, &mut homes);
+        let removed = if let Some(position) = pairs
             .iter()
             .position(|&(q, r)| q == quotient as u64 && r == remainder)
-        else {
-            return false;
+        {
+            pairs.remove(position);
+            // Decode yields cluster order already; removal preserves it.
+            let old_len = pairs.len() + 1;
+            self.encode_cluster(start, old_len, &pairs);
+            self.len -= 1;
+            true
+        } else {
+            false
         };
-        pairs.remove(position);
-        // Decode yields cluster order already; removal preserves it.
-        let old_len = pairs.len() + 1;
-        self.encode_cluster(start, old_len, &pairs);
-        self.len -= 1;
-        true
+        self.scratch_pairs = pairs;
+        self.scratch_homes = homes;
+        removed
     }
 
     /// Returns every stored `(quotient, remainder)` pair, used by merge.
@@ -549,8 +619,12 @@ where
         if self.seed_fingerprint != other.seed_fingerprint {
             return Err(MergeError::SeedMismatch);
         }
+        let mut scratch_pairs = core::mem::take(&mut self.scratch_pairs);
+        let mut scratch_homes = core::mem::take(&mut self.scratch_homes);
         for (quotient, remainder) in other.all_pairs() {
             if self.len == self.table_len() {
+                self.scratch_pairs = scratch_pairs;
+                self.scratch_homes = scratch_homes;
                 return Err(MergeError::InsufficientCapacity);
             }
             if self.slot_empty(quotient as usize) {
@@ -560,16 +634,18 @@ where
                 continue;
             }
             let start = self.cluster_start(quotient as usize);
-            let mut pairs = self.decode_cluster(start);
-            if pairs.contains(&(quotient, remainder)) {
+            self.decode_cluster_into(start, &mut scratch_pairs, &mut scratch_homes);
+            if scratch_pairs.contains(&(quotient, remainder)) {
                 continue;
             }
-            pairs.push((quotient, remainder));
-            self.circular_sort(start, &mut pairs);
-            let old_len = pairs.len() - 1;
-            self.encode_cluster(start, old_len, &pairs);
+            scratch_pairs.push((quotient, remainder));
+            self.circular_sort(start, &mut scratch_pairs);
+            let old_len = scratch_pairs.len() - 1;
+            self.encode_cluster(start, old_len, &scratch_pairs);
             self.len += 1;
         }
+        self.scratch_pairs = scratch_pairs;
+        self.scratch_homes = scratch_homes;
         Ok(())
     }
 }
