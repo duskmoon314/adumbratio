@@ -54,8 +54,8 @@ pub struct MisraGries<T> {
 /// ```text
 /// insert("x"): tracked? +1 : free? start at 1 : evict min, keep min+1 (error min)
 ///
-/// f(x) <= estimate(x) <= f(x) + error(x),   error <= N/(k+1)
-/// every item with f(x) > N/(k+1) is tracked
+/// f(x) <= estimate(x) <= f(x) + error(x),   error <= N/k
+/// every item with f(x) > N/k is tracked
 /// ```
 ///
 /// Space-Saving never underestimates — the dual of Misra–Gries — and in
@@ -245,9 +245,11 @@ impl<T> SpaceSaving<T> {
         self.total
     }
 
-    /// Returns the deterministic error bound, `N / (k + 1)`.
+    /// Returns the deterministic error bound, `N / k`: a recorded error is
+    /// a past value of the minimum counter, and the minimum of `k`
+    /// counters summing to `N` never exceeds `N / k`.
     pub const fn error_bound(&self) -> u64 {
-        self.total / (self.k as u64 + 1)
+        self.total / self.k as u64
     }
 
     /// Returns the tracked `(item, count, error)` entries, heaviest first.
@@ -584,6 +586,28 @@ mod tests {
         weighted_counters.sort_unstable();
         iterated_counters.sort_unstable();
         assert_eq!(weighted_counters, iterated_counters);
+    }
+
+    #[test]
+    fn space_saving_error_bound_is_n_over_k_not_k_plus_one() {
+        // With k = 2 counters summing to N, the minimum can reach N/k but
+        // not N/(k+1): a x40, b x34, then c records error 34 for c while
+        // N = 75, so N/(k+1) = 25 < 34 <= 37 = N/k.
+        let mut ss = SpaceSaving::new(2);
+        for _ in 0..40 {
+            ss.insert_item(&"a");
+        }
+        for _ in 0..34 {
+            ss.insert_item(&"b");
+        }
+        ss.insert_item(&"c");
+
+        let (count, error) = ss.estimate_with_error(&"c");
+        assert_eq!((count, error), (35, 34));
+        assert!(error > ss.total_count() / 3, "the edge case must exceed N/(k+1)");
+        assert!(error <= ss.error_bound(), "error {error} exceeds N/k bound");
+        // The presence guarantee likewise uses N/k: b (f = 34 > 25) may be
+        // evicted, but nothing with f > N/k can be.
     }
 
     #[test]
