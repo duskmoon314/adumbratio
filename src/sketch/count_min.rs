@@ -4,7 +4,6 @@ use core::convert::Infallible;
 use core::hash::{BuildHasher, Hash};
 use core::marker::PhantomData;
 
-use alloc::vec::Vec;
 
 use crate::block::{Matrix, PackedArray};
 use crate::error::MergeError;
@@ -300,8 +299,8 @@ where
         T: Hash + ?Sized,
     {
         let hash = hash_one(&self.hasher, item);
-        let indices: Vec<_> = self.row_indices(hash).collect();
-        for (row, index) in indices.into_iter().enumerate() {
+        let (depth, width) = (self.geometry.depth, self.geometry.width);
+        for (row, index) in (0..depth).map(|row| (row, row_index(hash, row, width))) {
             let current = self.rows.row(row).get(index);
             self.rows.row_mut(row).set(
                 index,
@@ -340,16 +339,17 @@ where
         T: Hash + ?Sized,
     {
         let hash = hash_one(&self.hasher, item);
-        let indices: Vec<_> = self.row_indices(hash).collect();
-        let minimum = indices
-            .iter()
+        let minimum = self
+            .row_indices(hash)
             .enumerate()
-            .map(|(row, &index)| self.rows.row(row).get(index))
+            .map(|(row, index)| self.rows.row(row).get(index))
             .min()
             .unwrap_or(0);
         let target = minimum.saturating_add(count).min(PackedArray::<BITS>::MAX);
 
-        for (row, index) in indices.into_iter().enumerate() {
+        // Second pass over a fresh (allocation-free) index iterator.
+        let (depth, width) = (self.geometry.depth, self.geometry.width);
+        for (row, index) in (0..depth).map(|row| (row, row_index(hash, row, width))) {
             let current = self.rows.row(row).get(index);
             if current < target {
                 self.rows.row_mut(row).set(index, target);

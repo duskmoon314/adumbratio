@@ -203,14 +203,27 @@ where
     /// Returns the signed estimate for the item behind a pre-hashed 64-bit
     /// value, using the same derivation as [`Self::estimate_signed`].
     pub fn estimate_signed_hash(&self, hash: u64) -> i64 {
-        let mut estimates: Vec<_> = (0..self.geometry.depth)
-            .map(|row| {
+        let depth = self.geometry.depth;
+        // Median of the per-row signed estimates. Typical depths fit a
+        // stack buffer, avoiding an allocation per query.
+        if depth <= 32 {
+            let mut estimates = [0_i64; 32];
+            for (row, slot) in estimates.iter_mut().take(depth).enumerate() {
                 let index = row_index(hash, row, self.geometry.width);
-                decode(self.rows.row(row).get(index)).saturating_mul(sign(hash, row))
-            })
-            .collect();
-        estimates.sort_unstable();
-        estimates[estimates.len() / 2]
+                *slot = decode(self.rows.row(row).get(index)).saturating_mul(sign(hash, row));
+            }
+            estimates[..depth].sort_unstable();
+            estimates[depth / 2]
+        } else {
+            let mut estimates: Vec<_> = (0..depth)
+                .map(|row| {
+                    let index = row_index(hash, row, self.geometry.width);
+                    decode(self.rows.row(row).get(index)).saturating_mul(sign(hash, row))
+                })
+                .collect();
+            estimates.sort_unstable();
+            estimates[depth / 2]
+        }
     }
 
     /// Returns the non-negative frequency estimate for `item`.

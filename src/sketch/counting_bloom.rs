@@ -3,7 +3,6 @@
 use core::convert::Infallible;
 use core::hash::{BuildHasher, Hash};
 
-use alloc::vec::Vec;
 
 use crate::block::PackedArray;
 use crate::error::MergeError;
@@ -250,10 +249,8 @@ where
             .scheme
             .indices(hash, self.geometry.hashes, self.geometry.bits)
         {
-            let next = self
-                .policy
-                .increment(self.counters.get(index), PackedArray::<BITS>::MAX, 1);
-            self.counters.set(index, next);
+            self.counters
+                .update(index, |v| self.policy.increment(v, PackedArray::<BITS>::MAX, 1));
         }
         self.inserted += 1;
     }
@@ -278,14 +275,18 @@ where
         T: Hash + ?Sized,
     {
         let hash = hash_one(&self.hasher, item);
-        let indices: Vec<_> = self
+        let may_be_present = self
             .scheme
             .indices(hash, self.geometry.hashes, self.geometry.bits)
-            .collect();
-        if indices.iter().any(|&index| self.counters.get(index) == 0) {
+            .all(|index| self.counters.get(index) != 0);
+        if !may_be_present {
             return false;
         }
-        for index in indices {
+        // Verified nonzero above; second pass over a fresh index iterator.
+        for index in self
+            .scheme
+            .indices(hash, self.geometry.hashes, self.geometry.bits)
+        {
             let next = self
                 .policy
                 .decrement(self.counters.get(index), PackedArray::<BITS>::MAX, 1);
