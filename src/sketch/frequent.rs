@@ -153,12 +153,14 @@ impl<T: Eq> MisraGries<T> {
     /// Inserts `count` occurrences of `item` at once, as one event of
     /// weight `count`.
     ///
-    /// Note this is *not* equivalent to calling [`Self::insert_item`]
-    /// `count` times: when the item is untracked and the summary is full,
-    /// the weighted form debits every counter by the whole `count` in one
-    /// step, while iterated inserts would debit progressively with
-    /// different intermediate counters. For tracked items (the common
-    /// case) the two coincide.
+    /// This is exactly equivalent to calling [`Self::insert_item`] `count`
+    /// times: when the item is untracked and the summary is full, a
+    /// weight-`count` event debits every counter by `min(count, m)` where
+    /// `m` is the smallest counter — the same total debit `count` unit
+    /// inserts would produce — and any weight beyond `m` starts the item's
+    /// own counter at `count - m`. The documented
+    /// `[f(x) - N/(k+1), f(x)]` guarantee therefore holds under weighted
+    /// inserts as well.
     pub fn insert_count(&mut self, item: &T, count: u64)
     where
         T: Clone,
@@ -175,9 +177,18 @@ impl<T: Eq> MisraGries<T> {
             self.counters.push((item.clone(), count));
             return;
         }
-        // Weighted form of the decrement-all rule: the item's weight is
-        // consumed by debiting every counter.
-        self.debit_all(count);
+        let min = self
+            .counters
+            .iter()
+            .map(|entry| entry.1)
+            .min()
+            .expect("a full summary has counters");
+        self.debit_all(min.min(count));
+        if count > min {
+            // Debiting by `min` freed at least one slot; the remaining
+            // weight becomes the item's counter, as unit inserts would.
+            self.counters.push((item.clone(), count - min));
+        }
     }
 
     /// Inserts one occurrence of `item`.
@@ -518,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn weighted_insert_differs_from_iteration_on_the_miss_path() {
+    fn weighted_insert_matches_unit_iteration() {
         // Tracked path: weighted and iterated inserts coincide exactly.
         let mut weighted = MisraGries::new(2);
         let mut iterated = MisraGries::new(2);
@@ -532,10 +543,9 @@ mod tests {
         }
         assert_eq!(weighted.counters(), iterated.counters());
 
-        // Miss path on fresh summaries: a weight-3 event debits every
-        // counter by 3 in one step (consuming the weight), while three unit
-        // inserts drop the old items once and then start tracking the new
-        // one.
+        // Miss path: a weight-3 event debits every counter by the minimum
+        // (1) and starts the item's counter at 2 — exactly what three unit
+        // inserts do.
         let mut weighted = MisraGries::new(2);
         let mut iterated = MisraGries::new(2);
         for item in ["a", "b"] {
@@ -546,11 +556,34 @@ mod tests {
         for _ in 0..3 {
             iterated.insert_item(&"c");
         }
-        assert!(
-            !weighted.counters().iter().any(|(item, _)| *item == "c"),
-            "the weight-3 event must be consumed by the debits"
-        );
-        assert_eq!(iterated.estimate_item(&"c"), 2);
+        assert_eq!(weighted.counters(), iterated.counters());
+        assert_eq!(weighted.estimate_item(&"c"), 2);
+
+        // Exact equivalence on a randomized weighted stream: counters must
+        // match the unit-iterated summary event for event.
+        let mut weighted = MisraGries::new(5);
+        let mut iterated = MisraGries::new(5);
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..500 {
+            let item = next() % 50;
+            let weight = 1 + next() % 50;
+            weighted.insert_count(&item, weight);
+            for _ in 0..weight {
+                iterated.insert_item(&item);
+            }
+        }
+        assert_eq!(weighted.total_count(), iterated.total_count());
+        let mut weighted_counters = weighted.counters().to_vec();
+        let mut iterated_counters = iterated.counters().to_vec();
+        weighted_counters.sort_unstable();
+        iterated_counters.sort_unstable();
+        assert_eq!(weighted_counters, iterated_counters);
     }
 
     #[test]

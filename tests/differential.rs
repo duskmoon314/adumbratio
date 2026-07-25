@@ -11,21 +11,9 @@
 //! live. Everything is driven by the crate's own `XorShift64` with fixed
 //! seeds, so a failure reproduces exactly with no extra dev-dependencies.
 //!
-//! Two assertion shapes here are deliberately *not* the naive documented
-//! bounds, because probes against the implementation showed the naive form
-//! is not the theory the code can honor (see the test bodies for minimal
-//! reproducers):
-//!
-//! - `MisraGries::insert_count` on an untracked item debits *every* counter
-//!   by the full weight. When the weight exceeds the smallest counter, the
-//!   total debit can exceed `N/(k+1)`, so the unit-weight guarantee
-//!   `estimate in [f - N/(k+1), f]` does not carry over to weighted
-//!   inserts. The weighted churn below asserts the invariant that does
-//!   hold (never overestimates); the documented bound is verified on a
-//!   parallel *unit-weight* summary fed the same item stream.
-//! - `SpaceSaving` records `error = min counter at eviction`; the minimum
-//!   of `k` counters is bounded by `N/k`, not `N/(k+1)`. The weighted
-//!   churn asserts the theory-backed `N/k` forms.
+//! `SpaceSaving` assertions use the theory-backed `N/k` error denominator
+//! (the recorded error is a past minimum counter, and the minimum of `k`
+//! counters never exceeds `N/k`); `error_bound()` returns the same form.
 
 use std::collections::{HashMap, HashSet};
 
@@ -581,30 +569,30 @@ fn misra_gries_and_space_saving_honor_weighted_deterministic_bounds() {
 
         if event % 250 == 249 {
             let unit_bound = unit_n / (k as u64 + 1);
+            let weighted_bound = weighted_n / (k as u64 + 1);
             // Space-Saving's recorded error is a past value of the minimum
-            // counter; the minimum of k counters never exceeds N/k. (The
-            // struct docs say N/(k+1); a 2-counter probe — a x40, b x34,
-            // then c — records error 34 > 75/3 = 25, so the theory-backed
-            // bound N/k is asserted here.)
+            // counter; the minimum of k counters never exceeds N/k.
             let ss_bound = weighted_n / k as u64;
             for item in 0..universe as u64 {
                 let index = item as usize;
 
-                // Weighted Misra-Gries: never overestimates, weighted or
-                // not (a counter only grows by the item's own arrivals).
-                // The tighter [f - N/(k+1), f] form does *not* survive the
-                // implemented weighted miss path, which debits every
-                // counter by the whole weight: with k = 2, inserts
-                // a^1 b^100 c^90 (weighted N = 191) leave est(b) = 10 <
-                // 100 - 63, and c (f = 90 > 63) untracked. See the file
-                // header; only the sound direction is asserted here.
+                // Weighted Misra-Gries is exactly unit-iterated-equivalent,
+                // so the full [f - N/(k+1), f] bound and the presence
+                // guarantee hold with weighted N.
                 let est_weighted = mg_weighted.estimate_item(&item);
+                let exact_weighted = weighted_truth[index];
                 assert!(
-                    est_weighted <= weighted_truth[index],
-                    "event {event}: weighted MG overestimates {item}: \
-                     {est_weighted} > {}",
-                    weighted_truth[index]
+                    est_weighted <= exact_weighted
+                        && est_weighted + weighted_bound >= exact_weighted,
+                    "event {event}: weighted MG estimate {est_weighted} for {item} outside \
+                     [{exact_weighted} - {weighted_bound}, {exact_weighted}]"
                 );
+                if exact_weighted > weighted_bound {
+                    assert!(
+                        est_weighted > 0,
+                        "event {event}: weighted MG lost {item} with count {exact_weighted} > {weighted_bound}"
+                    );
+                }
 
                 let est_unit = mg_unit.estimate_item(&item);
                 let exact_unit = unit_truth[index];
