@@ -153,13 +153,8 @@ impl<S> Iblt<S> {
     }
 
     /// The `k` cell positions of a key.
-    fn positions(&self, key: u64) -> impl Iterator<Item = usize> + '_ {
-        (0..self.positions_per_key).map(move |j| {
-            reduce(
-                mix64(key ^ (j as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)),
-                self.cells.len(),
-            )
-        })
+    fn positions(&self, key: u64) -> impl Iterator<Item = usize> {
+        positions_in(self.cells.len(), key, self.positions_per_key).into_iter()
     }
 
     fn apply(&mut self, key: u64, sign: i32) {
@@ -200,7 +195,7 @@ impl<S> Iblt<S> {
             let key = cell.key_sum;
             out.push((key, side));
             let verification = mix64(key);
-            for position in positions_in(&cells, key, positions_per_key) {
+            for position in positions_in(cells.len(), key, positions_per_key) {
                 let target = &mut cells[position];
                 target.count -= side;
                 target.key_sum ^= key;
@@ -230,12 +225,30 @@ impl<S> Iblt<S> {
     }
 }
 
-/// The `k` cell positions of a key in a table (free function so `decode`
-/// can borrow its clone).
-fn positions_in(cells: &[IbltCell], key: u64, k: usize) -> Vec<usize> {
-    (0..k)
-        .map(|j| reduce(mix64(key ^ (j as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)), cells.len()))
-        .collect()
+/// The `k` cell positions of a key, drawn **distinct** by rejection
+/// sampling from the keyed hash stream (free function so `decode` can
+/// borrow its clone).
+///
+/// Distinctness is load-bearing: a key mapped to the same cell twice
+/// contributes `count ±2` there while its key and verification hash
+/// xor-cancel, leaving a cell that can mimic a pure cell under mixed
+/// signs and stall or corrupt peeling. Tiny tables simply get fewer
+/// positions (capped at the cell count).
+fn positions_in(cell_count: usize, key: u64, k: usize) -> Vec<usize> {
+    let target = k.min(cell_count);
+    let mut positions = Vec::with_capacity(target);
+    let mut j = 0_u64;
+    while positions.len() < target {
+        let position = reduce(
+            mix64(key ^ j.wrapping_mul(0x9e37_79b9_7f4a_7c15)),
+            cell_count,
+        );
+        if !positions.contains(&position) {
+            positions.push(position);
+        }
+        j += 1;
+    }
+    positions
 }
 
 impl<S> Iblt<S>
@@ -243,6 +256,11 @@ where
     S: BuildHasher,
 {
     /// Inserts `item` (its 64-bit hash, like every sketch in the crate).
+    ///
+    /// Insert each distinct item at most once per table: a second insert
+    /// xor-cancels the item's key and verification hash in its cells while
+    /// doubling their counts, and the table can no longer decode (it fails
+    /// loudly with [`DecodeError`], never wrongly).
     pub fn insert_item<T>(&mut self, item: &T)
     where
         T: Hash + ?Sized,
@@ -492,6 +510,27 @@ mod tests {
 
         let other_seed = Iblt::with_seed(1_000, 8);
         assert_eq!(left.merge_from(&other_seed), Err(MergeError::SeedMismatch));
+    }
+
+    #[test]
+    fn positions_are_distinct_per_key() {
+        let table = Iblt::with_seed(1_000, 0);
+        for key in 0..1_000_u64 {
+            let mut positions = table.positions(key).collect::<Vec<_>>();
+            let drawn = positions.len();
+            positions.sort_unstable();
+            positions.dedup();
+            assert_eq!(
+                positions.len(),
+                drawn,
+                "key {key} maps to a repeated cell position"
+            );
+        }
+
+        // Tiny tables get positions capped at the cell count, with no
+        // unbounded rejection sampling.
+        let tiny = Iblt::with_seed(1, 0);
+        assert_eq!(tiny.positions(42).count(), tiny.cell_count());
     }
 
     #[test]

@@ -926,15 +926,11 @@ fn hyperloglog_sparse_dense_transition_churn() {
 fn iblt_churn_reconciles_exactly_within_capacity() {
     let seed = 3_u64;
     let hasher = DefaultBuildHasher::new(seed);
-    // 3000 cells against a symmetric difference capped at 160. NOTE: the
-    // generous headroom dodges a known decode-reliability hazard this
-    // differential work uncovered — a key whose four cell positions
-    // collide in one cell contributes count but no key/hash sum there,
-    // which can produce a false "pure" cell under mixed signs and stall
-    // peeling (reported; see the handoff notes). The tables are sized so
-    // the fixed seed below decodes at every checkpoint.
-    let mut a = Iblt::with_seed(2_000, seed);
-    let mut b = Iblt::with_seed(2_000, seed);
+    // Decode load is the symmetric difference (capped at 160 keys below);
+    // 300 cells give 1.9x headroom over the worst-case difference, near
+    // the paper's 1.3-1.5x rule of thumb for k = 4 distinct cells per key.
+    let mut a = Iblt::with_seed(200, seed);
+    let mut b = Iblt::with_seed(200, seed);
     let mut ref_a: HashSet<u64> = HashSet::new();
     let mut ref_b: HashSet<u64> = HashSet::new();
     for i in 0..800_u64 {
@@ -1021,9 +1017,8 @@ fn iblt_reconcile_never_reports_a_wrong_difference() {
     // all-cells-empty check, so a returned `Ok` must always be *exactly*
     // the reference symmetric difference, and a difference far beyond the
     // cell count must surface a reported failure — never a partial or
-    // wrong set presented as success. No per-point decode-success rate is
-    // asserted: peeling stalls are stochastic, and (as reported) a key
-    // whose cell positions collide makes them markedly likelier.
+    // wrong set presented as success. With distinct cell positions per
+    // key, every difference with at least ~3x headroom must decode.
     let mut decodes = 0_u64;
     for diff in [20_u64, 60, 120, 200, 400, 1_200] {
         let mut a = Iblt::with_seed(400, seed);
@@ -1044,6 +1039,12 @@ fn iblt_reconcile_never_reports_a_wrong_difference() {
             .map(|i| hash_one(&hasher, &i))
             .collect();
         let result = a.reconcile(&b);
+        if diff <= 200 {
+            assert!(
+                result.is_ok(),
+                "diff {diff}: 600 cells give >=3x headroom; decode must succeed"
+            );
+        }
         if diff == 1_200 {
             // 8 mappings per cell cannot peel; anything this far beyond
             // capacity MUST fail loudly rather than misreport.
@@ -1067,7 +1068,7 @@ fn iblt_reconcile_never_reports_a_wrong_difference() {
         }
     }
     assert!(
-        decodes >= 2,
+        decodes >= 4,
         "only {decodes}/6 ladder points decoded; anti-vacuousness floor"
     );
 }
