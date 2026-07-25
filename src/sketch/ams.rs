@@ -10,30 +10,30 @@ use alloc::vec::Vec;
 use crate::error::MergeError;
 #[cfg(any(feature = "std", feature = "libm"))]
 use crate::float;
-use crate::hash::{DefaultBuildHasher, hash_one, mix64};
+use crate::hash::{DefaultBuildHasher, hash_one, row_index, sign};
 use crate::traits::{Insert, Merge, Sketch};
 
-/// An AMS tug-of-war sketch for the second frequency moment `F2`: the
+/// An AMS-family sketch for the second frequency moment `F2`: the
 /// self-join size `sum(f_i^2)`, i.e. the squared L2 norm of the frequency
 /// vector.
 ///
-/// Every item draws a per-row sign in `{-1, +1}`; each row keeps the sum
-/// `z_j = sum_i sigma_j(i) * f_i`. Squaring kills the cross terms in
-/// expectation, so `z_j^2` is an unbiased estimator of `F2`. Rows are
-/// grouped: the estimate is the median over groups of the within-group
-/// mean of squares — the paper's median-of-means amplification.
+/// Every item maps to one bucket in each of `groups` rows and adds a
+/// per-row sign there; the sum of squared counters in a row is an
+/// unbiased estimator of `F2` (the `+/-1` cross terms vanish in
+/// expectation). The estimate is the median over groups of those sums —
+/// the median-of-means amplification from the AMS paper, in the
+/// bucketed-per-group layout of Charikar's Count Sketch, so an insert
+/// costs `O(groups)` writes instead of `O(groups × width)`.
 ///
 /// ```text
-/// insert("x"): for each row j: z[j] += sign(hash("x"), j)
+/// insert("x"): for each group g: counters[g][h_g("x")] += sign_g("x")
 ///
-/// f2() = median over groups g of mean(z[j]^2 for j in g)
+/// f2() = median over groups g of sum_j(counters[g][j]^2)
 /// l2_norm() = sqrt(f2())
 /// ```
 ///
 /// The sketch is *linear*: merging is an element-wise sum of the row
-/// counters and yields exactly the sketch of the combined stream. It is
-/// also the conceptual parent of Count Sketch — same signed counters, a
-/// different read-out.
+/// counters and yields exactly the sketch of the combined stream.
 ///
 /// # Rényi entropy
 ///
@@ -50,6 +50,9 @@ use crate::traits::{Insert, Merge, Sketch};
 /// - Noga Alon, Yossi Matias, and Mario Szegedy, "The Space Complexity of
 ///   Approximating the Frequency Moments", STOC 1996 (journal version:
 ///   JCSS 58(1), 1999). <https://doi.org/10.1145/237814.237823>
+/// - Moses Charikar, Kevin Chen, and Martin Farach-Colton, "Finding
+///   Frequent Items in Data Streams", Theoretical Computer Science, 2004.
+///   <https://doi.org/10.1016/j.tcs.2003.10.024>
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AmsSketch<S = DefaultBuildHasher> {
@@ -176,8 +179,10 @@ impl<S> AmsSketch<S> {
         self.total = 0;
     }
 
-    /// Returns the group means of squared counters, used by [`Self::f2`].
-    fn group_means(&self) -> Vec<f64> {
+    /// Returns the group sums of squared counters, used by [`Self::f2`].
+    /// For the bucketed layout the estimator per group is the *sum* (not
+    /// the mean) of squared counters: `E[sum(z_j^2)] = F2` per row.
+    fn group_sums(&self) -> Vec<f64> {
         self.counters
             .chunks_exact(self.width)
             .map(|group| {
@@ -185,7 +190,6 @@ impl<S> AmsSketch<S> {
                     .iter()
                     .map(|&z| (z as f64) * (z as f64))
                     .sum::<f64>()
-                    / self.width as f64
             })
             .collect()
     }
@@ -195,30 +199,32 @@ impl<S> AmsSketch<S>
 where
     S: BuildHasher,
 {
-    /// Inserts one occurrence of `item`, adding its per-row sign.
+    /// Inserts one occurrence of `item`, adding its sign into one bucket
+    /// per group — `O(groups)` writes, not `O(groups × width)`.
     ///
-    /// Signs are derived 64 at a time from the bits of one mixed hash per
-    /// chunk, which is as independent as per-counter mixing for this
-    /// purpose (see the avalanche tests) and 64x cheaper.
+    /// The per-group bucketing is the Charikar–Chen–Farach-Colton layout:
+    /// an item maps to a single counter in each row and adds its sign
+    /// there. The sum of squared counters within a row is unbiased for
+    /// `F2` by the same `+/-1` orthogonality as the classic tug-of-war
+    /// layout, with the same median-of-groups amplification — identical
+    /// geometry and error guarantees, at a fraction of the insert cost.
     pub fn insert_item<T>(&mut self, item: &T)
     where
         T: Hash + ?Sized,
     {
         let hash = hash_one(&self.hasher, item);
-        for (chunk_index, chunk) in self.counters.chunks_mut(64).enumerate() {
-            let mixed = mix64(hash ^ (chunk_index as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15));
-            for (bit, counter) in chunk.iter_mut().enumerate() {
-                *counter += ((mixed >> bit & 1) as i64) * 2 - 1;
-            }
+        for group in 0..self.groups {
+            let index = group * self.width + row_index(hash, group, self.width);
+            self.counters[index] += sign(hash, group);
         }
         self.total = self.total.saturating_add(1);
     }
 
     /// Estimates `F2 = sum(f_i^2)`, the self-join size of the stream.
     pub fn f2(&self) -> f64 {
-        let mut means = self.group_means();
-        means.sort_by(f64::total_cmp);
-        means[means.len() / 2]
+        let mut sums = self.group_sums();
+        sums.sort_by(f64::total_cmp);
+        sums[sums.len() / 2]
     }
 
     /// Estimates the L2 norm `sqrt(sum(f_i^2))` of the frequency vector.
